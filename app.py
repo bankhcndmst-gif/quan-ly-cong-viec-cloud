@@ -1,138 +1,85 @@
-# ============================================================
-# APP: HỆ THỐNG QUẢN LÝ CÔNG VIỆC – STREAMLIT CLOUD
-# ============================================================
-
 import streamlit as st
 import gspread
 import pandas as pd
 
-# ============================================================
-# CẤU HÌNH CHUNG
-# ============================================================
-
-st.set_page_config(
-    page_title="Hệ thống Quản lý Công việc",
-    layout="wide"
-)
-
-# ============================================================
-# HÀM KẾT NỐI GOOGLE SHEET
-# ============================================================
-
-@st.cache_data(ttl=600)
-def connect_gsheet():
-    """
-    Kết nối Google Sheet an toàn, tự bổ sung token_uri nếu thiếu
-    """
-    creds = dict(st.secrets["gdrive"])
-    spreadsheet_id = creds.pop("spreadsheet_id")
-
-    # 🔴 BẮT BUỘC: đảm bảo token_uri tồn tại
-    if "token_uri" not in creds:
-        creds["token_uri"] = "https://oauth2.googleapis.com/token"
-
-    gc = gspread.service_account_from_dict(creds)
-    sh = gc.open_by_key(spreadsheet_id)
-    return sh
-
-
-@st.cache_data(ttl=600)
-def load_sheet(sh, sheet_name: str) -> pd.DataFrame:
-    """
-    Load 1 worksheet thành DataFrame an toàn
-    """
+# --- Hàm Tải Dữ liệu từ Google Sheets (An toàn cho Streamlit Cloud) ---
+@st.cache_data(ttl=600)  # Cache 10 phút
+def load_data_from_gsheets():
     try:
-        ws = sh.worksheet(sheet_name)
-        records = ws.get_all_records()
-        df = pd.DataFrame(records)
-        return df
-    except gspread.WorksheetNotFound:
-        st.warning(f"⚠️ Không tìm thấy tab: {sheet_name}")
-        return pd.DataFrame()
+        # 1. Tạo credentials TỐI THIỂU – CHUẨN GSPREAD (Có token_uri)
+        credentials = {
+            "type": "service_account",
+            "private_key": st.secrets["gdrive"]["private_key"].replace("\\n", "\n"),
+            "client_email": st.secrets["gdrive"]["client_email"],
+            "token_uri": "https://oauth2.googleapis.com/token", 
+        }
+
+        # 2. Kết nối Google Sheet
+        gc = gspread.service_account_from_dict(credentials)
+        sh = gc.open_by_key(st.secrets["gdrive"]["spreadsheet_id"])
+
+        # 3. Load dữ liệu
+        sheets = {}
+        for name in [
+            "1_NHAN_SU",
+            "7_CONG_VIEC",
+            "2_NHIEM_VU",
+            "4_TIEU_CHI"
+        ]:
+            try:
+                ws = sh.worksheet(name)
+                sheets[name] = pd.DataFrame(ws.get_all_records())
+            except Exception as e:
+                st.warning(f"⚠️ Sheet {name}: {e}")
+                sheets[name] = pd.DataFrame()
+
+        return sheets
+
     except Exception as e:
-        st.error(f"❌ Lỗi khi đọc tab {sheet_name}: {e}")
-        return pd.DataFrame()
+        st.error(f"❌ Lỗi kết nối Google Sheets: {e}")
+        return None
 
+# --- Cấu hình và Chạy Ứng dụng ---
+st.set_page_config(layout="wide", page_title="Hệ thống Quản lý Công việc", page_icon="📈")
+st.title("📈 Hệ thống Quản lý Công việc (Test Cloud)")
 
-# ============================================================
-# UI CHÍNH
-# ============================================================
+data_sheets = load_data_from_gsheets()
 
-st.title("🗂️ Hệ thống Quản lý Công việc")
+if data_sheets:
+    
+    st.success("✅ Kết nối và tải dữ liệu Google Sheets thành công!")
+    
+    # ----------------------------------------------------
+    # PHẦN HIỂN THỊ DỮ LIỆU
+    # ----------------------------------------------------
+    
+    st.subheader("Bảng Dữ liệu Đã Tải về")
+    
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Nhân Sự (1_NHAN_SU)", 
+        "Công Việc (7_CONG_VIEC)", 
+        "Nhiệm Vụ (2_NHIEM_VU)", 
+        "Tiêu Chí (4_TIEU_CHI)"
+    ])
 
-with st.spinner("🔌 Đang kết nối Google Sheet..."):
-    try:
-        sh = connect_gsheet()
-    except Exception as e:
-        st.exception(e)
-        st.stop()
+    with tab1:
+        st.dataframe(data_sheets.get("1_NHAN_SU", pd.DataFrame()), use_container_width=True)
 
-st.success("✅ Kết nối Google Sheet thành công")
+    with tab2:
+        df_cv = data_sheets.get("7_CONG_VIEC", pd.DataFrame())
+        st.dataframe(df_cv, use_container_width=True)
+        
+        # Ví dụ phân tích nhỏ: Thống kê trạng thái công việc
+        if not df_cv.empty and 'Trạng thái CV' in df_cv.columns:
+            st.markdown("##### Thống kê Trạng thái Công việc:")
+            status_counts = df_cv['Trạng thái CV'].value_counts().reset_index()
+            status_counts.columns = ['Trạng thái', 'Số lượng']
+            st.bar_chart(status_counts, x='Trạng thái', y='Số lượng')
 
-# ============================================================
-# LIỆT KÊ TAB (DEBUG & CHUẨN HÓA)
-# ============================================================
-
-with st.expander("📋 Danh sách tab trong Google Sheet", expanded=False):
-    try:
-        tab_names = [ws.title for ws in sh.worksheets()]
-        st.write(tab_names)
-    except Exception as e:
-        st.exception(e)
-
-# ============================================================
-# LOAD DỮ LIỆU CÁC TAB CHÍNH
-# ============================================================
-
-TAB_CONFIG = {
-    "DUAN": "DUAN",
-    "NHANSU": "NHANSU",
-    "DONVI": "DONVI",
-    "VANBAN": "VANBAN",
-    "CONGVIEC": "CONGVIEC",
-    "GOITHAU": "GOITHAU",
-    "HOPDONG": "HOPDONG",
-    "CAUHINH": "CAUHINH",
-}
-
-data = {}
-
-for key, sheet_name in TAB_CONFIG.items():
-    data[key] = load_sheet(sh, sheet_name)
-
-# ============================================================
-# HIỂN THỊ THEO TAB UI
-# ============================================================
-
-tabs = st.tabs(list(TAB_CONFIG.keys()))
-
-for tab, key in zip(tabs, TAB_CONFIG.keys()):
-    with tab:
-        df = data.get(key, pd.DataFrame())
-
-        if df.empty:
-            st.info("Chưa có dữ liệu")
-        else:
-            st.write(f"📊 Số dòng: {len(df)}")
-            st.dataframe(df, use_container_width=True)
-
-# ============================================================
-# KIỂM TRA DỮ LIỆU CƠ BẢN (KHÔNG BẮT BUỘC)
-# ============================================================
-
-with st.expander("🧪 Kiểm tra dữ liệu cơ bản", expanded=False):
-    if "DUAN" in data and not data["DUAN"].empty:
-        df_duan = data["DUAN"]
-        missing_id = df_duan["ID_DUAN"].isna().sum()
-        st.write(f"- DUAN thiếu ID_DUAN: {missing_id}")
-
-    if "NHANSU" in data and not data["NHANSU"].empty:
-        df_ns = data["NHANSU"]
-        missing_ns = df_ns["ID_NHANSU"].isna().sum()
-        st.write(f"- NHANSU thiếu ID_NHANSU: {missing_ns}")
-
-st.caption("© Hệ thống Quản lý Công việc – Streamlit Cloud")
-
-
-
-
+    with tab3:
+        st.dataframe(data_sheets.get("2_NHIEM_VU", pd.DataFrame()), use_container_width=True)
+        
+    with tab4:
+        st.dataframe(data_sheets.get("4_TIEU_CHI", pd.DataFrame()), use_container_width=True)
+        
+    st.caption("Dữ liệu được làm mới sau mỗi 10 phút.")
