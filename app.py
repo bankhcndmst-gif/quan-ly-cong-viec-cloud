@@ -37,7 +37,7 @@ def connect_gsheet():
     return gspread.authorize(creds)
 
 # =========================
-# UTILS
+# UTILS (ĐÃ THÊM HÀM GET_UNIQUE_LIST)
 # =========================
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = (
@@ -58,6 +58,13 @@ def parse_dates(df: pd.DataFrame) -> pd.DataFrame:
         if c in df.columns:
             df[c] = pd.to_datetime(df[c], errors="coerce")
     return df
+
+def get_unique_list(df, col_name, prefix="Tất cả"):
+    """Lấy danh sách các giá trị duy nhất (để dùng cho list_trang_thai và list_loai_viec)."""
+    if df.empty or col_name not in df.columns:
+        return [prefix]
+    unique_list = df[col_name].dropna().astype(str).unique().tolist()
+    return [prefix] + sorted(unique_list)
 
 def get_display_list(df: pd.DataFrame, id_col: str, name_col: str, prefix="Tất cả"):
     """Tạo danh sách cho Selectbox: [ID: Name]"""
@@ -107,7 +114,6 @@ def load_sheet_df(sheet_name: str) -> pd.DataFrame:
         df = remove_duplicate_and_empty_cols(df) 
         df = parse_dates(df)
         
-        # Chuyển các cột không phải ngày tháng thành chuỗi để lọc dễ dàng hơn
         for col in df.columns:
              if col not in DATE_COLS and not pd.api.types.is_datetime64_any_dtype(df[col]):
                  df[col] = df[col].astype(str).str.strip()
@@ -142,16 +148,14 @@ def load_all_sheets():
 def save_raw_sheet(sheet_name: str, edited_df: pd.DataFrame):
     """Ghi DataFrame mới vào Sheet gốc."""
     try:
-        # 1. Kết nối và mở Sheet
         gc = connect_gsheet()
         sh = gc.open_by_key(st.secrets["gdrive"]["spreadsheet_id"])
         ws = sh.worksheet(sheet_name)
         
-        # 2. Xóa dữ liệu cũ (Giữ lại hàng tiêu đề)
+        # Xóa dữ liệu cũ (Giữ lại hàng tiêu đề)
         ws.clear()
         
-        # 3. Ghi dữ liệu mới
-        # Chuyển đổi về list of lists để ghi
+        # Ghi dữ liệu mới
         data_to_write = [edited_df.columns.tolist()] + edited_df.values.tolist()
         
         ws.append_rows(data_to_write, value_input_option='USER_ENTERED')
@@ -163,7 +167,7 @@ def save_raw_sheet(sheet_name: str, edited_df: pd.DataFrame):
     except Exception as e:
         st.error(f"❌ Lỗi khi ghi vào Sheet '{sheet_name}': {e}")
 
-def append_new_work(new_data: dict):
+def append_new_work(new_data: dict, all_sheets):
     """Thêm dòng công việc mới vào Sheet 7_CONG_VIEC."""
     df_cv = all_sheets.get("7_CONG_VIEC", pd.DataFrame())
     
@@ -185,26 +189,25 @@ def append_new_work(new_data: dict):
             'TEN_VIEC': new_data['ten_viec'],
             'NOI_DUNG': new_data['noi_dung'],
             'LOAI_VIEC': new_data['loai_viec'],
-            'NGUON_GIAO_VIEC': new_data['nguon_giao_viec'], # Cột mới
+            'NGUON_GIAO_VIEC': new_data['nguon_giao_viec'], 
             'NGUOI_GIAO': new_data['nguoi_giao'],
             'NGUOI_NHAN': new_data['nguoi_nhan'],
             'NGAY_GIAO': new_data['ngay_giao'].strftime('%Y-%m-%d'),
             'HAN_CHOT': new_data['han_chot'].strftime('%Y-%m-%d'),
             'NGUOI_PHOI_HOP': new_data['nguoi_phoi_hop'],
             'TRANG_THAI_TONG': new_data['trang_thai_tong'],
-            'TRANG_THAI_CHI_TIET': new_data['trang_thai_chi_tiet'], # Cột mới
-            'NGAY_THUC_TE_XONG': new_data['ngay_thuc_te_xong'], # Cột mới (có thể là rỗng)
-            'IDVB_VAN_BAN': new_data['idvb_van_ban'], # Cột mới
+            'TRANG_THAI_CHI_TIET': new_data['trang_thai_chi_tiet'], 
+            'NGAY_THUC_TE_XONG': new_data['ngay_thuc_te_xong'], 
+            'IDVB_VAN_BAN': new_data['idvb_van_ban'], 
             'IDHD_CV': new_data['idhd_cv'],
             'IDDA_CV': new_data['idda_cv'],
             'IDGT_CV': new_data['idgt_cv'],
-            'VUONG_MAC': new_data['vuong_mac'], # Cột mới
-            'DE_XUAT': new_data['de_xuat'], # Cột mới
-            'IDDV_CV': new_data['iddv_cv'], # Cột mới
-            'GHI_CHU_CV': new_data['ghi_chu_cv'], # Cột mới
+            'VUONG_MAC': new_data['vuong_mac'], 
+            'DE_XUAT': new_data['de_xuat'], 
+            'IDDV_CV': new_data['iddv_cv'], 
+            'GHI_CHU_CV': new_data['ghi_chu_cv'], 
         }
         
-        # Ghi dòng mới, điền các giá trị vào đúng cột
         values_to_append = [new_row_dict.get(h, '') for h in header]
         
         ws_cv.append_row(values_to_append, value_input_option='USER_ENTERED')
@@ -221,7 +224,6 @@ def append_new_work(new_data: dict):
 # REPORT LOGIC
 # =========================
 def filter_report(df, start_date, end_date, id_duan, id_goithau, id_hopdong, trang_thai):
-    # Sử dụng tên cột chính xác: IDDA_CV, IDGT_CV, IDHD_CV
     df = df.copy() 
 
     if "NGAY_GIAO" in df.columns and pd.api.types.is_datetime64_any_dtype(df["NGAY_GIAO"]):
@@ -258,7 +260,7 @@ df_dv = all_sheets.get("2_DON_VI", pd.DataFrame())
 
 
 # ---------------------
-# LẤY DANH SÁCH LỌC VÀ NHẬP LIỆU (HIỂN THỊ TÊN BÊN CẠNH ID)
+# LẤY DANH SÁCH LỌC VÀ NHẬP LIỆU (ĐÃ FIX NAMEERROR)
 # ---------------------
 def get_display_lists(df_cv, df_ns, df_dv, all_sheets):
     list_trang_thai = get_unique_list(df_cv, "TRANG_THAI_TONG")
@@ -364,7 +366,7 @@ with tab_report:
                 st.markdown("---")
 
 # ---------------------
-# TAB 2: GIAO VIỆC MỚI (NHẬP LIỆU) - ĐÃ BỔ SUNG CỘT
+# TAB 2: GIAO VIỆC MỚI (NHẬP LIỆU) 
 # ---------------------
 with tab_input:
     st.header("📝 Giao Công Việc Mới (Sheet 7_CONG_VIEC)")
@@ -437,7 +439,7 @@ with tab_input:
                         'ngay_giao': new_ngay_giao, 'han_chot': new_han_chot, 
                         'trang_thai_tong': new_trang_thai,
                         'trang_thai_chi_tiet': new_trang_thai_chi_tiet,
-                        'ngay_thuc_te_xong': new_ngay_thuc_te_xong.strftime('%Y-%m-%d') if new_ngay_thuc_te_xong else '',
+                        'ngay_thuc_te_xong': new_ngay_thuc_te_xong,
                         
                         'idda_cv': id_da if id_da != "Tất cả" else "",
                         'idhd_cv': id_hd if id_hd != "Tất cả" else "",
@@ -450,7 +452,7 @@ with tab_input:
                         'de_xuat': new_de_xuat,
                         'ghi_chu_cv': new_ghi_chu,
                     }
-                    append_new_work(new_data)
+                    append_new_work(new_data, all_sheets)
 
 
 # ---------------------
