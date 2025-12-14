@@ -5,7 +5,7 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 
 # =========================
-# CONFIG
+# CONFIG (ĐÃ SỬA TÊN/THỨ TỰ SHEET THEO YÊU CẦU MỚI)
 # =========================
 REQUIRED_SHEETS = [
     "1_NHAN_SU",
@@ -15,8 +15,8 @@ REQUIRED_SHEETS = [
     "5_GOI_THAU",
     "6_HOP_DONG",
     "7_CONG_VIEC",
-    "9_CAU_HINH",
-    "11_CHAT_GEMINI",
+    "8_CAU_HINH",    # ĐÃ SỬA TỪ 9_CAU_HINH
+    "9_CHAT_GEMINI", # ĐÃ SỬA TỪ 11_CHAT_GEMINI
 ]
 
 DATE_COLS = ["NGAY_GIAO", "HAN_CHOT", "NGAY_THUC_TE_XONG"]
@@ -30,7 +30,6 @@ def connect_gsheet():
     creds_dict = dict(st.secrets["gdrive"])
     
     # 2. BẮT BUỘC: Thêm các trường bị thiếu mà google.oauth2.service_account.Credentials cần
-    # Đây là giải pháp khắc phục lỗi MalformedError: missing fields token_uri/auth_uri
     if 'token_uri' not in creds_dict:
         creds_dict['token_uri'] = "https://oauth2.googleapis.com/token"
     if 'auth_uri' not in creds_dict:
@@ -57,6 +56,15 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     )
     return df
 
+def remove_duplicate_and_empty_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """Xử lý lỗi Duplicate column names found do cột rỗng hoặc trùng lặp."""
+    # 1. Loại bỏ các cột không có tên (Header là rỗng)
+    df = df.loc[:, df.columns != '']
+    
+    # 2. Xử lý trùng lặp bằng cách chỉ giữ lại cột đầu tiên
+    df = df.loc[:, ~df.columns.duplicated(keep='first')]
+    return df
+
 def parse_dates(df: pd.DataFrame) -> pd.DataFrame:
     for c in DATE_COLS:
         if c in df.columns:
@@ -80,14 +88,17 @@ def load_sheet_df(sheet_name: str) -> pd.DataFrame:
 
         df = pd.DataFrame(values[1:], columns=values[0])
         df = normalize_columns(df)
+        df = remove_duplicate_and_empty_cols(df) 
         df = parse_dates(df)
         return df
     except gspread.exceptions.WorksheetNotFound:
         st.warning(f"⚠️ Sheet '{sheet_name}' không tồn tại trong Spreadsheet.")
         return pd.DataFrame()
+    except gspread.exceptions.PermissionError:
+        st.error(f"❌ Lỗi truy cập Sheet '{sheet_name}'. Vui lòng chia sẻ lại Google Sheet cho Service Account.")
+        return pd.DataFrame()
     except Exception as e:
-        # Nếu lỗi là PermissionError, sẽ được bắt ở đây
-        st.error(f"❌ Lỗi tải Sheet '{sheet_name}': {e}")
+        st.error(f"❌ Lỗi tải Sheet '{sheet_name}': {type(e).__name__} - {e}")
         return pd.DataFrame()
 
 
@@ -97,15 +108,17 @@ def load_sheet_df(sheet_name: str) -> pd.DataFrame:
 @st.cache_data
 def load_all_sheets():
     sheets = {}
+    st.info("Đang tải dữ liệu từ Google Sheets...")
     for name in REQUIRED_SHEETS:
         sheets[name] = load_sheet_df(name)
+    st.success("✅ Kết nối và tải dữ liệu Google Sheets thành công!")
     return sheets
 
 # =========================
 # REPORT LOGIC
 # =========================
 def filter_report(df, start_date, end_date, id_duan, id_goithau, id_hopdong):
-    df = df.copy()
+    df = df.copy() 
 
     if "NGAY_GIAO" in df.columns and pd.api.types.is_datetime64_any_dtype(df["NGAY_GIAO"]):
         df = df[
@@ -113,15 +126,15 @@ def filter_report(df, start_date, end_date, id_duan, id_goithau, id_hopdong):
             (df["NGAY_GIAO"] <= end_date)
         ]
 
-    if id_duan != "Tất cả" and "ID_DU_AN" in df.columns:
-        df = df[df["ID_DU_AN"] == id_duan]
+    if id_duan != "Tất cả" and "IDDA_CV" in df.columns:
+        df = df[df["IDDA_CV"].astype(str) == id_duan]
 
-    if id_goithau != "Tất cả" and "ID_GOI_THAU" in df.columns:
-        df = df[df["ID_GOI_THAU"] == id_goithau]
+    if id_goithau != "Tất cả" and "IDGT_CV" in df.columns:
+        df = df[df["IDGT_CV"].astype(str) == id_goithau]
 
-    if id_hopdong != "Tất cả" and "ID_HOP_DONG" in df.columns:
-        df = df[df["ID_HOP_DONG"] == id_hopdong]
-
+    if id_hopdong != "Tất cả" and "IDHD_CV" in df.columns:
+        df = df[df["IDHD_CV"].astype(str) == id_hopdong]
+        
     return df
 
 # =========================
@@ -132,14 +145,7 @@ st.title("📋 QUẢN LÝ CÔNG VIỆC – GOOGLE SHEET")
 
 try:
     all_sheets = load_all_sheets()
-    
-    # Kiểm tra xem có dữ liệu Sheet 7 (Công việc) không
-    if "7_CONG_VIEC" not in all_sheets or all_sheets["7_CONG_VIEC"].empty:
-        st.warning("⚠️ Không thể tải dữ liệu Sheet '7_CONG_VIEC' hoặc Sheet rỗng. Vui lòng kiểm tra tên Sheet và quyền truy cập.")
-        df_cv = pd.DataFrame()
-    else:
-        st.success("✅ Kết nối và tải dữ liệu Google Sheets thành công!")
-        df_cv = all_sheets["7_CONG_VIEC"]
+    df_cv = all_sheets.get("7_CONG_VIEC", pd.DataFrame())
 
     # ---------------------
     # FILTER BAR
@@ -150,24 +156,27 @@ try:
         start_date = st.date_input("Từ ngày", datetime.now().date() - timedelta(days=7))
         end_date = st.date_input("Đến ngày", datetime.now().date())
         
-        # Đảm bảo df_cv không rỗng trước khi lấy unique values
+        # Lấy danh sách ID từ các cột liên kết trong Sheet 7_CONG_VIEC
         if not df_cv.empty:
-            id_duan = ["Tất cả"] + sorted(df_cv.get("ID_DU_AN", pd.Series()).dropna().astype(str).unique().tolist())
-            id_goithau = ["Tất cả"] + sorted(df_cv.get("ID_GOI_THAU", pd.Series()).dropna().astype(str).unique().tolist())
-            id_hopdong = ["Tất cả"] + sorted(df_cv.get("ID_HOP_DONG", pd.Series()).dropna().astype(str).unique().tolist())
+            id_duan = ["Tất cả"] + sorted(df_cv.get("IDDA_CV", pd.Series()).dropna().astype(str).unique().tolist())
+            id_goithau = ["Tất cả"] + sorted(df_cv.get("IDGT_CV", pd.Series()).dropna().astype(str).unique().tolist())
+            id_hopdong = ["Tất cả"] + sorted(df_cv.get("IDHD_CV", pd.Series()).dropna().astype(str).unique().tolist())
         else:
             id_duan, id_goithau, id_hopdong = ["Tất cả"], ["Tất cả"], ["Tất cả"]
 
-        chon_duan = st.selectbox("ID Dự án", id_duan)
-        chon_goithau = st.selectbox("ID Gói thầu", id_goithau)
-        chon_hopdong = st.selectbox("ID Hợp đồng", id_hopdong)
+        # Chú ý: Tên cột liên kết trong Sheet 7 là IDDA_CV, IDGT_CV, IDHD_CV
+        chon_duan = st.selectbox("ID Dự án (IDDA_CV)", id_duan)
+        chon_goithau = st.selectbox("ID Gói thầu (IDGT_CV)", id_goithau)
+        chon_hopdong = st.selectbox("ID Hợp đồng (IDHD_CV)", id_hopdong)
 
     # ---------------------
     # REPORT
     # ---------------------
     st.subheader("📊 KẾT QUẢ BÁO CÁO")
     
-    if not df_cv.empty:
+    if df_cv.empty:
+         st.warning("Không có dữ liệu công việc để báo cáo. Vui lòng kiểm tra các cảnh báo tải dữ liệu phía trên.")
+    else:
         df_report = filter_report(
             df_cv,
             pd.to_datetime(start_date),
@@ -181,22 +190,29 @@ try:
             st.info("Không có công việc nào trong khoảng đã chọn.")
         else:
             for _, r in df_report.iterrows():
-                # Lấy tên cột chính xác (thay NOI_DUNG bằng TEN_VIEC hoặc tên phù hợp)
                 ten_viec = r.get("TEN_VIEC") or r.get("NOI_DUNG") or "Không tên"
-                
                 han_val = r.get("HAN_CHOT")
+                
                 han = (
                     han_val.strftime("%d/%m/%Y")
                     if pd.notna(han_val) and hasattr(han_val, "strftime")
                     else "—"
                 )
-
+                
+                trang_thai = r.get("TRANG_THAI_TONG", "")
+                
+                today = datetime.now().date()
+                is_overdue = pd.notna(han_val) and han_val.date() < today and trang_thai != "Hoan_Thanh"
+                status_display = f"**{trang_thai}**"
+                if is_overdue:
+                    status_display = f"🔴 **{trang_thai} (QUÁ HẠN)**"
+                
                 st.markdown(
                     f"""
-                    **• {ten_viec}** (ID: {r.get('ID_CONGVIEC')})
+                    **• {ten_viec}** (ID: {r.get('ID_CONG_VIEC')})
                     - Ngày giao: {r.get("NGAY_GIAO").strftime("%d/%m/%Y") if pd.notna(r.get("NGAY_GIAO")) else "—"}
                     - Hạn chót: **{han}**
-                    - Trạng thái: {r.get("TRANG_THAI_TONG", "")}
+                    - Trạng thái: {status_display}
                     """
                 )
                 st.markdown("---")
@@ -208,10 +224,12 @@ try:
     tabs = st.tabs(REQUIRED_SHEETS)
     for tab, name in zip(tabs, REQUIRED_SHEETS):
         with tab:
-            st.dataframe(all_sheets.get(name, pd.DataFrame()), use_container_width=True)
+            df_display = all_sheets.get(name, pd.DataFrame())
+            if df_display.empty:
+                st.info(f"Sheet '{name}' không có dữ liệu để hiển thị.")
+            else:
+                st.dataframe(df_display, use_container_width=True)
 
 except Exception as e:
     st.error("❌ Lỗi hệ thống")
-    # Hiển thị Traceback chỉ khi lỗi không phải là MalformedError (để tránh hiển thị lỗi đã biết)
-    if not ("token_uri" in str(e) and "MalformedError" in str(e)):
-        st.exception(e)
+    st.exception(e)
