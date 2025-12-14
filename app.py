@@ -1,4 +1,5 @@
 # --- Hàm Tải Dữ liệu (Dùng cache để tối ưu) ---
+import streamlit as st
 @st.cache_data(ttl=600)  # Cache trong 10 phút
 def load_data_from_gsheets():
     try:
@@ -38,3 +39,4 @@ def load_data_from_gsheets():
     except Exception as e:
         st.error(f"Lỗi kết nối hoặc cấu hình: Vui lòng kiểm tra file secrets.toml và quyền chia sẻ Google Sheet. Chi tiết: {e}")
         return None
+
