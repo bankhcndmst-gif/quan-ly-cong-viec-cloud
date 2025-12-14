@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import gspread
 
 # =========================================================
-# === CẤU HÌNH GOOGLE SHEET
+# CẤU HÌNH GOOGLE SHEET
 # =========================================================
 SPREADSHEET_ID = st.secrets["gdrive"]["spreadsheet_id"]
 
@@ -22,90 +22,152 @@ def get_gspread_client():
 
 @st.cache_resource
 def get_spreadsheet():
-    gc = get_gspread_client()
-    return gc.open_by_key(SPREADSHEET_ID)
+    return get_gspread_client().open_by_key(SPREADSHEET_ID)
 
 @st.cache_data(ttl=300)
 def load_sheet_df(sheet_name: str) -> pd.DataFrame:
-    sh = get_spreadsheet()
-    ws = sh.worksheet(sheet_name)
+    ws = get_spreadsheet().worksheet(sheet_name)
     rows = ws.get_all_records()
     return pd.DataFrame(rows)
 
 def save_sheet_df(sheet_name: str, df: pd.DataFrame):
-    sh = get_spreadsheet()
-    ws = sh.worksheet(sheet_name)
+    ws = get_spreadsheet().worksheet(sheet_name)
     ws.clear()
     ws.update([df.columns.tolist()] + df.astype(str).values.tolist())
 
 # =========================================================
-# === LOAD DỮ LIỆU
+# LOAD TẤT CẢ CÁC SHEET
 # =========================================================
 @st.cache_data(ttl=300)
-def load_all_data():
-    df_congviec = load_sheet_df("7_CONG_VIEC")
-    df_nhansu = load_sheet_df("1_NHAN_SU")[["ID_NHANSU", "HOTEN", "EMAIL"]]
+def load_all_sheets():
+    sheets = {}
+    sheet_names = [
+        "1_NHAN_SU",
+        "2_DON_VI",
+        "3_VAN_BAN",
+        "4_DU_AN",
+        "5_GOI_THAU",
+        "6_HOP_DONG",
+        "7_CONG_VIEC",
+        "9_CAU_HINH",
+        "11_CHAT_GEMINI",
+    ]
+    for name in sheet_names:
+        sheets[name] = load_sheet_df(name)
+    return sheets
+
+# =========================================================
+# GIAO DIỆN CHUNG
+# =========================================================
+st.set_page_config(layout="wide", page_title="Hệ thống Quản lý Công việc EVNGENCO1")
+st.title("🗂️ Hệ thống Quản lý Công việc EVNGENCO1")
+st.caption("Nguồn dữ liệu: Google Sheet (realtime)")
+
+all_sheets = load_all_sheets()
+
+# =========================================================
+# TẠO TAB
+# =========================================================
+tabs = st.tabs([
+    "1. NHÂN SỰ",
+    "2. ĐƠN VỊ",
+    "3. VĂN BẢN",
+    "4. DỰ ÁN",
+    "5. GÓI THẦU",
+    "6. HỢP ĐỒNG",
+    "7. CÔNG VIỆC",
+    "9. CẤU HÌNH",
+    "11. CHAT GEMINI",
+])
+
+# =========================================================
+# TAB TEMPLATE – XEM & SỬA DỮ LIỆU GỐC
+# =========================================================
+def render_editable_tab(sheet_name: str):
+    df = all_sheets[sheet_name].copy()
+    st.subheader(f"Nội dung {sheet_name}")
+    edited_df = st.data_editor(
+        df,
+        num_rows="dynamic",
+        use_container_width=True,
+    )
+    if st.button(f"💾 LƯU {sheet_name}", key=f"save_{sheet_name}"):
+        save_sheet_df(sheet_name, edited_df)
+        st.cache_data.clear()
+        st.success(f"Đã lưu {sheet_name}")
+        st.rerun()
+
+# =========================================================
+# TAB 1 → 6 (DỮ LIỆU GỐC)
+# =========================================================
+with tabs[0]:
+    render_editable_tab("1_NHAN_SU")
+
+with tabs[1]:
+    render_editable_tab("2_DON_VI")
+
+with tabs[2]:
+    render_editable_tab("3_VAN_BAN")
+
+with tabs[3]:
+    render_editable_tab("4_DU_AN")
+
+with tabs[4]:
+    render_editable_tab("5_GOI_THAU")
+
+with tabs[5]:
+    render_editable_tab("6_HOP_DONG")
+
+# =========================================================
+# TAB 7 – CÔNG VIỆC (LOGIC RIÊNG)
+# =========================================================
+with tabs[6]:
+    st.subheader("Quản lý Công việc")
+
+    df_cv = all_sheets["7_CONG_VIEC"].copy()
+    df_ns = all_sheets["1_NHAN_SU"][["ID_NHANSU", "HOTEN"]]
 
     df = pd.merge(
-        df_congviec,
-        df_nhansu,
+        df_cv,
+        df_ns,
         left_on="NGUOI_NHAN",
         right_on="ID_NHANSU",
         how="left",
     )
 
-    # Chuẩn hóa
     df["HAN_CHOT"] = pd.to_datetime(df["HAN_CHOT"], errors="coerce").dt.date
     df["NGAY_THUC_TE_XONG"] = pd.to_datetime(df["NGAY_THUC_TE_XONG"], errors="coerce").dt.date
     df[["VUONG_MAC", "DE_XUAT", "TRANG_THAI_CHI_TIET"]] = df[
         ["VUONG_MAC", "DE_XUAT", "TRANG_THAI_CHI_TIET"]
     ].fillna("")
 
-    # Danh sách trạng thái – cố định (đơn giản)
     list_trang_thai = ["Dang_Lam", "Hoan_Thanh", "Cho_Duyet", "Tam_Dung"]
-
-    return df, list_trang_thai
-
-# =========================================================
-# === GIAO DIỆN
-# =========================================================
-st.set_page_config(layout="wide", page_title="Quản Lý Công Việc EVNGENCO1")
-st.title("🗂️ Hệ thống Quản lý Công việc EVNGENCO1")
-st.caption("Nguồn dữ liệu: Google Sheet – realtime")
-
-df_tong_hop, list_trang_thai = load_all_data()
-
-tab1, tab2 = st.tabs([
-    "1. QUẢN LÝ CÔNG VIỆC",
-    "2. BÁO CÁO TỔNG HỢP",
-])
-
-# =========================================================
-# TAB 1 – QUẢN LÝ CÔNG VIỆC
-# =========================================================
-with tab1:
-    st.header("Danh sách công việc")
 
     # Bộ lọc
     col1, col2 = st.columns(2)
     with col1:
-        nguoi_list = ["Tất cả"] + sorted(df_tong_hop["HOTEN"].dropna().unique().tolist())
-        loc_nguoi = st.selectbox("Lọc theo người nhận", nguoi_list)
+        nguoi = st.selectbox(
+            "Lọc theo người nhận",
+            ["Tất cả"] + sorted(df["HOTEN"].dropna().unique().tolist())
+        )
     with col2:
-        tt_list = ["Tất cả"] + list_trang_thai
-        loc_tt = st.selectbox("Lọc theo trạng thái", tt_list)
+        tt = st.selectbox(
+            "Lọc theo trạng thái",
+            ["Tất cả"] + list_trang_thai
+        )
 
-    df_view = df_tong_hop.copy()
-    if loc_nguoi != "Tất cả":
-        df_view = df_view[df_view["HOTEN"] == loc_nguoi]
-    if loc_tt != "Tất cả":
-        df_view = df_view[df_view["TRANG_THAI_TONG"] == loc_tt]
+    df_view = df.copy()
+    if nguoi != "Tất cả":
+        df_view = df_view[df_view["HOTEN"] == nguoi]
+    if tt != "Tất cả":
+        df_view = df_view[df_view["TRANG_THAI_TONG"] == tt]
 
     display_cols = [
         "ID_CONGVIEC", "TEN_VIEC", "HOTEN",
         "HAN_CHOT", "TRANG_THAI_TONG",
-        "TRANG_THAI_CHI_TIET", "VUONG_MAC",
-        "DE_XUAT", "NGAY_THUC_TE_XONG",
+        "TRANG_THAI_CHI_TIET",
+        "VUONG_MAC", "DE_XUAT",
+        "NGAY_THUC_TE_XONG",
     ]
 
     edited_df = st.data_editor(
@@ -123,28 +185,23 @@ with tab1:
         },
     )
 
-    if st.button("💾 LƯU THAY ĐỔI"):
+    if st.button("💾 LƯU CÔNG VIỆC"):
         df_save = edited_df.drop(columns=["HOTEN"])
         save_sheet_df("7_CONG_VIEC", df_save)
         st.cache_data.clear()
-        st.success("Đã lưu dữ liệu vào Google Sheet")
+        st.success("Đã lưu công việc")
         st.rerun()
 
 # =========================================================
-# TAB 2 – BÁO CÁO
+# TAB 9 – CẤU HÌNH
 # =========================================================
-with tab2:
-    st.header("Báo cáo tổng hợp")
+with tabs[7]:
+    render_editable_tab("9_CAU_HINH")
 
-    hom_nay = datetime.now().date()
-    df = df_tong_hop.copy()
-    df["QUAHAN"] = (df["HAN_CHOT"] < hom_nay) & (df["TRANG_THAI_TONG"] != "Hoan_Thanh")
-
-    st.dataframe(
-        df[[
-            "TEN_VIEC", "HOTEN", "HAN_CHOT",
-            "TRANG_THAI_TONG", "QUAHAN",
-            "VUONG_MAC", "DE_XUAT",
-        ]],
-        use_container_width=True,
-    )
+# =========================================================
+# TAB 11 – CHAT GEMINI (CHUẨN BỊ AI)
+# =========================================================
+with tabs[8]:
+    st.subheader("Chat Gemini (dữ liệu cấu hình)")
+    st.dataframe(all_sheets["11_CHAT_GEMINI"], use_container_width=True)
+    st.info("Tab này dùng làm dữ liệu cho AI / Gemini về sau (chưa kích hoạt chat).")
