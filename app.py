@@ -22,10 +22,14 @@ st.set_page_config(
 @st.cache_data(ttl=600)
 def connect_gsheet():
     """
-    Kết nối Google Sheet và trả về đối tượng Spreadsheet
+    Kết nối Google Sheet an toàn, tự bổ sung token_uri nếu thiếu
     """
     creds = dict(st.secrets["gdrive"])
     spreadsheet_id = creds.pop("spreadsheet_id")
+
+    # 🔴 BẮT BUỘC: đảm bảo token_uri tồn tại
+    if "token_uri" not in creds:
+        creds["token_uri"] = "https://oauth2.googleapis.com/token"
 
     gc = gspread.service_account_from_dict(creds)
     sh = gc.open_by_key(spreadsheet_id)
@@ -128,3 +132,4 @@ with st.expander("🧪 Kiểm tra dữ liệu cơ bản", expanded=False):
         st.write(f"- NHANSU thiếu ID_NHANSU: {missing_ns}")
 
 st.caption("© Hệ thống Quản lý Công việc – Streamlit Cloud")
+
