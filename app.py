@@ -1,85 +1,150 @@
 import streamlit as st
-import gspread
 import pandas as pd
+from datetime import datetime, timedelta
+import gspread
 
-# --- Hàm Tải Dữ liệu từ Google Sheets (An toàn cho Streamlit Cloud) ---
-@st.cache_data(ttl=600)  # Cache 10 phút
-def load_data_from_gsheets():
-    try:
-        # 1. Tạo credentials TỐI THIỂU – CHUẨN GSPREAD (Có token_uri)
-        credentials = {
-            "type": "service_account",
-            "private_key": st.secrets["gdrive"]["private_key"].replace("\\n", "\n"),
-            "client_email": st.secrets["gdrive"]["client_email"],
-            "token_uri": "https://oauth2.googleapis.com/token", 
-        }
+# =========================================================
+# === CẤU HÌNH GOOGLE SHEET
+# =========================================================
+SPREADSHEET_ID = st.secrets["gdrive"]["spreadsheet_id"]
 
-        # 2. Kết nối Google Sheet
-        gc = gspread.service_account_from_dict(credentials)
-        sh = gc.open_by_key(st.secrets["gdrive"]["spreadsheet_id"])
+def _make_creds():
+    return {
+        "type": "service_account",
+        "client_email": st.secrets["gdrive"]["client_email"],
+        "private_key": st.secrets["gdrive"]["private_key"].replace("\\n", "\n"),
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
 
-        # 3. Load dữ liệu
-        sheets = {}
-        for name in [
-            "1_NHAN_SU",
-            "7_CONG_VIEC",
-            "2_NHIEM_VU",
-            "4_TIEU_CHI"
-        ]:
-            try:
-                ws = sh.worksheet(name)
-                sheets[name] = pd.DataFrame(ws.get_all_records())
-            except Exception as e:
-                st.warning(f"⚠️ Sheet {name}: {e}")
-                sheets[name] = pd.DataFrame()
+@st.cache_resource
+def get_gspread_client():
+    return gspread.service_account_from_dict(_make_creds())
 
-        return sheets
+@st.cache_resource
+def get_spreadsheet():
+    gc = get_gspread_client()
+    return gc.open_by_key(SPREADSHEET_ID)
 
-    except Exception as e:
-        st.error(f"❌ Lỗi kết nối Google Sheets: {e}")
-        return None
+@st.cache_data(ttl=300)
+def load_sheet_df(sheet_name: str) -> pd.DataFrame:
+    sh = get_spreadsheet()
+    ws = sh.worksheet(sheet_name)
+    rows = ws.get_all_records()
+    return pd.DataFrame(rows)
 
-# --- Cấu hình và Chạy Ứng dụng ---
-st.set_page_config(layout="wide", page_title="Hệ thống Quản lý Công việc", page_icon="📈")
-st.title("📈 Hệ thống Quản lý Công việc (Test Cloud)")
+def save_sheet_df(sheet_name: str, df: pd.DataFrame):
+    sh = get_spreadsheet()
+    ws = sh.worksheet(sheet_name)
+    ws.clear()
+    ws.update([df.columns.tolist()] + df.astype(str).values.tolist())
 
-data_sheets = load_data_from_gsheets()
+# =========================================================
+# === LOAD DỮ LIỆU
+# =========================================================
+@st.cache_data(ttl=300)
+def load_all_data():
+    df_congviec = load_sheet_df("7_CONG_VIEC")
+    df_nhansu = load_sheet_df("1_NHAN_SU")[["ID_NHANSU", "HOTEN", "EMAIL"]]
 
-if data_sheets:
-    
-    st.success("✅ Kết nối và tải dữ liệu Google Sheets thành công!")
-    
-    # ----------------------------------------------------
-    # PHẦN HIỂN THỊ DỮ LIỆU
-    # ----------------------------------------------------
-    
-    st.subheader("Bảng Dữ liệu Đã Tải về")
-    
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "Nhân Sự (1_NHAN_SU)", 
-        "Công Việc (7_CONG_VIEC)", 
-        "Nhiệm Vụ (2_NHIEM_VU)", 
-        "Tiêu Chí (4_TIEU_CHI)"
-    ])
+    df = pd.merge(
+        df_congviec,
+        df_nhansu,
+        left_on="NGUOI_NHAN",
+        right_on="ID_NHANSU",
+        how="left",
+    )
 
-    with tab1:
-        st.dataframe(data_sheets.get("1_NHAN_SU", pd.DataFrame()), use_container_width=True)
+    # Chuẩn hóa
+    df["HAN_CHOT"] = pd.to_datetime(df["HAN_CHOT"], errors="coerce").dt.date
+    df["NGAY_THUC_TE_XONG"] = pd.to_datetime(df["NGAY_THUC_TE_XONG"], errors="coerce").dt.date
+    df[["VUONG_MAC", "DE_XUAT", "TRANG_THAI_CHI_TIET"]] = df[
+        ["VUONG_MAC", "DE_XUAT", "TRANG_THAI_CHI_TIET"]
+    ].fillna("")
 
-    with tab2:
-        df_cv = data_sheets.get("7_CONG_VIEC", pd.DataFrame())
-        st.dataframe(df_cv, use_container_width=True)
-        
-        # Ví dụ phân tích nhỏ: Thống kê trạng thái công việc
-        if not df_cv.empty and 'Trạng thái CV' in df_cv.columns:
-            st.markdown("##### Thống kê Trạng thái Công việc:")
-            status_counts = df_cv['Trạng thái CV'].value_counts().reset_index()
-            status_counts.columns = ['Trạng thái', 'Số lượng']
-            st.bar_chart(status_counts, x='Trạng thái', y='Số lượng')
+    # Danh sách trạng thái – cố định (đơn giản)
+    list_trang_thai = ["Dang_Lam", "Hoan_Thanh", "Cho_Duyet", "Tam_Dung"]
 
-    with tab3:
-        st.dataframe(data_sheets.get("2_NHIEM_VU", pd.DataFrame()), use_container_width=True)
-        
-    with tab4:
-        st.dataframe(data_sheets.get("4_TIEU_CHI", pd.DataFrame()), use_container_width=True)
-        
-    st.caption("Dữ liệu được làm mới sau mỗi 10 phút.")
+    return df, list_trang_thai
+
+# =========================================================
+# === GIAO DIỆN
+# =========================================================
+st.set_page_config(layout="wide", page_title="Quản Lý Công Việc EVNGENCO1")
+st.title("🗂️ Hệ thống Quản lý Công việc EVNGENCO1")
+st.caption("Nguồn dữ liệu: Google Sheet – realtime")
+
+df_tong_hop, list_trang_thai = load_all_data()
+
+tab1, tab2 = st.tabs([
+    "1. QUẢN LÝ CÔNG VIỆC",
+    "2. BÁO CÁO TỔNG HỢP",
+])
+
+# =========================================================
+# TAB 1 – QUẢN LÝ CÔNG VIỆC
+# =========================================================
+with tab1:
+    st.header("Danh sách công việc")
+
+    # Bộ lọc
+    col1, col2 = st.columns(2)
+    with col1:
+        nguoi_list = ["Tất cả"] + sorted(df_tong_hop["HOTEN"].dropna().unique().tolist())
+        loc_nguoi = st.selectbox("Lọc theo người nhận", nguoi_list)
+    with col2:
+        tt_list = ["Tất cả"] + list_trang_thai
+        loc_tt = st.selectbox("Lọc theo trạng thái", tt_list)
+
+    df_view = df_tong_hop.copy()
+    if loc_nguoi != "Tất cả":
+        df_view = df_view[df_view["HOTEN"] == loc_nguoi]
+    if loc_tt != "Tất cả":
+        df_view = df_view[df_view["TRANG_THAI_TONG"] == loc_tt]
+
+    display_cols = [
+        "ID_CONGVIEC", "TEN_VIEC", "HOTEN",
+        "HAN_CHOT", "TRANG_THAI_TONG",
+        "TRANG_THAI_CHI_TIET", "VUONG_MAC",
+        "DE_XUAT", "NGAY_THUC_TE_XONG",
+    ]
+
+    edited_df = st.data_editor(
+        df_view[display_cols],
+        use_container_width=True,
+        num_rows="fixed",
+        column_config={
+            "ID_CONGVIEC": st.column_config.Column("ID", disabled=True),
+            "HOTEN": st.column_config.Column("Người nhận", disabled=True),
+            "HAN_CHOT": st.column_config.DateColumn("Hạn chót"),
+            "NGAY_THUC_TE_XONG": st.column_config.DateColumn("Ngày hoàn thành"),
+            "TRANG_THAI_TONG": st.column_config.SelectboxColumn(
+                "Trạng thái", options=list_trang_thai, required=True
+            ),
+        },
+    )
+
+    if st.button("💾 LƯU THAY ĐỔI"):
+        df_save = edited_df.drop(columns=["HOTEN"])
+        save_sheet_df("7_CONG_VIEC", df_save)
+        st.cache_data.clear()
+        st.success("Đã lưu dữ liệu vào Google Sheet")
+        st.rerun()
+
+# =========================================================
+# TAB 2 – BÁO CÁO
+# =========================================================
+with tab2:
+    st.header("Báo cáo tổng hợp")
+
+    hom_nay = datetime.now().date()
+    df = df_tong_hop.copy()
+    df["QUAHAN"] = (df["HAN_CHOT"] < hom_nay) & (df["TRANG_THAI_TONG"] != "Hoan_Thanh")
+
+    st.dataframe(
+        df[[
+            "TEN_VIEC", "HOTEN", "HAN_CHOT",
+            "TRANG_THAI_TONG", "QUAHAN",
+            "VUONG_MAC", "DE_XUAT",
+        ]],
+        use_container_width=True,
+    )
