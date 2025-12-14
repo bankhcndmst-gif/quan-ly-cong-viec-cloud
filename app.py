@@ -19,7 +19,7 @@ st.set_page_config(
 # HÀM KẾT NỐI GOOGLE SHEET
 # ============================================================
 
-#@st.cache_data(ttl=600)
+@st.cache_data(ttl=600)
 def connect_gsheet():
     """
     Kết nối Google Sheet an toàn, tự bổ sung token_uri nếu thiếu
@@ -132,5 +132,6 @@ with st.expander("🧪 Kiểm tra dữ liệu cơ bản", expanded=False):
         st.write(f"- NHANSU thiếu ID_NHANSU: {missing_ns}")
 
 st.caption("© Hệ thống Quản lý Công việc – Streamlit Cloud")
+
 
 
