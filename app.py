@@ -1,4 +1,5 @@
 # --- Hàm Tải Dữ liệu từ Google Sheets (An toàn cho Streamlit Cloud) ---
+import streamlit as st
 @st.cache_data(ttl=600)  # Cache 10 phút
 def load_data_from_gsheets():
     try:
@@ -34,3 +35,4 @@ def load_data_from_gsheets():
     except Exception as e:
         st.error(f"❌ Lỗi kết nối Google Sheets: {e}")
         return None
+
