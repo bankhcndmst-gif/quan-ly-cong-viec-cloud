@@ -1,13 +1,13 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
 import gspread
+from datetime import datetime, timedelta
 
 # =====================================================
-# CONFIG
+# CẤU HÌNH CHUNG
 # =====================================================
 st.set_page_config(
-    page_title="Quản lý Công việc EVNGENCO1",
+    page_title="Hệ thống Quản lý Công việc EVNGENCO1",
     layout="wide"
 )
 
@@ -20,164 +20,178 @@ SHEET_TABS = [
     "6_HOP_DONG",
     "7_CONG_VIEC",
     "9_CAU_HINH",
-    "11_CHAT_GEMINI",
+    "11_CHAT_GEMINI"
 ]
 
 # =====================================================
-# GOOGLE SHEET CONNECT
+# KẾT NỐI GOOGLE SHEET
 # =====================================================
 @st.cache_resource
 def connect_gsheet():
-    creds = {
-        "type": "service_account",
-        "client_email": st.secrets["gdrive"]["client_email"],
-        "private_key": st.secrets["gdrive"]["private_key"].replace("\\n", "\n"),
-        "token_uri": "https://oauth2.googleapis.com/token",
-    }
+    creds = dict(st.secrets["gdrive"])
+    creds["private_key"] = creds["private_key"].replace("\\n", "\n")
     gc = gspread.service_account_from_dict(creds)
-    sh = gc.open_by_key(st.secrets["gdrive"]["spreadsheet_id"])
+    sh = gc.open_by_key(creds["spreadsheet_id"])
     return sh
 
+# =====================================================
+# LOAD 1 SHEET – AN TOÀN TUYỆT ĐỐI
+# =====================================================
 @st.cache_data(ttl=300)
-def load_sheet_df(sheet_name):
+def load_sheet_df(sheet_name: str) -> pd.DataFrame:
     sh = connect_gsheet()
     ws = sh.worksheet(sheet_name)
-    rows = ws.get_all_values()
-    if len(rows) < 2:
-        return pd.DataFrame(columns=rows[0] if rows else [])
-    return pd.DataFrame(rows[1:], columns=rows[0])
 
+    values = ws.get_all_values()
+
+    if not values or len(values) < 2:
+        return pd.DataFrame()
+
+    header = values[0]
+    clean_header = []
+    valid_idx = []
+
+    for i, h in enumerate(header):
+        h = h.strip()
+        if h:
+            clean_header.append(h)
+            valid_idx.append(i)
+
+    if not clean_header:
+        return pd.DataFrame()
+
+    rows = []
+    for r in values[1:]:
+        row = []
+        for idx in valid_idx:
+            row.append(r[idx] if idx < len(r) else "")
+        rows.append(row)
+
+    return pd.DataFrame(rows, columns=clean_header)
+
+# =====================================================
+# LOAD TOÀN BỘ SHEET
+# =====================================================
 @st.cache_data(ttl=300)
 def load_all_sheets():
     data = {}
+    errors = {}
+
     for name in SHEET_TABS:
-        data[name] = load_sheet_df(name)
-    return data
+        try:
+            data[name] = load_sheet_df(name)
+        except Exception as e:
+            data[name] = pd.DataFrame()
+            errors[name] = str(e)
+
+    return data, errors
 
 # =====================================================
-# LOAD DATA
+# BÁO CÁO TỔNG HỢP
 # =====================================================
-st.title("🗂️ HỆ THỐNG QUẢN LÝ CÔNG VIỆC – EVNGENCO1")
+def generate_report(df_cv, tu_ngay, den_ngay, id_du_an, id_goi_thau, id_hop_dong):
+    df = df_cv.copy()
 
-try:
-    all_sheets = load_all_sheets()
-except Exception as e:
-    st.error("❌ Không thể tải Google Sheet")
-    st.exception(e)
-    st.stop()
+    for col in ["HAN_CHOT", "NGAY_THUC_TE_XONG", "NGAY_GIAO"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
 
-df_congviec = all_sheets["7_CONG_VIEC"]
-df_nhansu = all_sheets["1_NHAN_SU"]
-
-# Merge để có tên người nhận
-if "NGUOI_NHAN" in df_congviec.columns and "ID_NHANSU" in df_nhansu.columns:
-    df_congviec = df_congviec.merge(
-        df_nhansu[["ID_NHANSU", "HOTEN"]],
-        left_on="NGUOI_NHAN",
-        right_on="ID_NHANSU",
-        how="left"
-    )
-
-# Chuẩn hóa ngày
-for col in ["NGAY_GIAO", "HAN_CHOT", "NGAY_THUC_TE_XONG"]:
-    if col in df_congviec.columns:
-        df_congviec[col] = pd.to_datetime(df_congviec[col], errors="coerce")
-
-# =====================================================
-# TABS
-# =====================================================
-tabs = st.tabs(
-    [
-        "📋 Công việc",
-        "📊 Báo cáo",
-        "👥 Nhân sự",
-        "🏢 Đơn vị",
-        "📄 Văn bản",
-        "🏗️ Dự án",
-        "📦 Gói thầu",
-        "📑 Hợp đồng",
-        "⚙️ Cấu hình & Chat",
-    ]
-)
-
-# =====================================================
-# TAB 1 – CÔNG VIỆC
-# =====================================================
-with tabs[0]:
-    st.subheader("📋 Danh sách công việc")
-    st.dataframe(df_congviec, use_container_width=True)
-
-# =====================================================
-# TAB 2 – BÁO CÁO
-# =====================================================
-with tabs[1]:
-    st.subheader("📊 BÁO CÁO TIẾN ĐỘ CÔNG VIỆC")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        ngay_a = st.date_input("📅 Từ ngày", datetime.now().date() - timedelta(days=7))
-    with col2:
-        ngay_b = st.date_input("📅 Đến ngày", datetime.now().date())
-
-    col3, col4, col5 = st.columns(3)
-    with col3:
-        du_an_list = ["TẤT CẢ"] + sorted(df_congviec["ID_DU_AN"].dropna().unique().tolist())
-        chon_du_an = st.selectbox("ID Dự án", du_an_list)
-    with col4:
-        goi_thau_list = ["TẤT CẢ"] + sorted(df_congviec["ID_GOI_THAU"].dropna().unique().tolist())
-        chon_goi_thau = st.selectbox("ID Gói thầu", goi_thau_list)
-    with col5:
-        hop_dong_list = ["TẤT CẢ"] + sorted(df_congviec["ID_HOP_DONG"].dropna().unique().tolist())
-        chon_hop_dong = st.selectbox("ID Hợp đồng", hop_dong_list)
-
-    df_bc = df_congviec.copy()
-
-    df_bc = df_bc[
-        (df_bc["NGAY_GIAO"] <= pd.to_datetime(ngay_b)) &
+    df = df[
+        (df["NGAY_GIAO"] <= den_ngay) &
         (
-            df_bc["NGAY_THUC_TE_XONG"].isna() |
-            (df_bc["NGAY_THUC_TE_XONG"] >= pd.to_datetime(ngay_a))
+            df["NGAY_THUC_TE_XONG"].isna() |
+            (df["NGAY_THUC_TE_XONG"] >= tu_ngay)
         )
     ]
 
-    if chon_du_an != "TẤT CẢ":
-        df_bc = df_bc[df_bc["ID_DU_AN"] == chon_du_an]
-    if chon_goi_thau != "TẤT CẢ":
-        df_bc = df_bc[df_bc["ID_GOI_THAU"] == chon_goi_thau]
-    if chon_hop_dong != "TẤT CẢ":
-        df_bc = df_bc[df_bc["ID_HOP_DONG"] == chon_hop_dong]
+    if id_du_an != "Tất cả" and "IDDA_DU_AN" in df.columns:
+        df = df[df["IDDA_DU_AN"] == id_du_an]
 
-    df_xong = df_bc[df_bc["TRANG_THAI_TONG"] == "Hoan_Thanh"]
-    df_dang = df_bc[df_bc["TRANG_THAI_TONG"] != "Hoan_Thanh"]
+    if id_goi_thau != "Tất cả" and "IDGT_GOI_THAU" in df.columns:
+        df = df[df["IDGT_GOI_THAU"] == id_goi_thau]
 
-    st.markdown("### ✅ Công việc đã hoàn thành")
-    st.dataframe(df_xong, use_container_width=True)
+    if id_hop_dong != "Tất cả" and "IDHD_HOP_DONG" in df.columns:
+        df = df[df["IDHD_HOP_DONG"] == id_hop_dong]
 
-    st.markdown("### ⏳ Công việc đang thực hiện / tồn đọng")
-    st.dataframe(df_dang, use_container_width=True)
+    df["QUA_HAN"] = (
+        (df["HAN_CHOT"] < den_ngay) &
+        (df["TRANG_THAI_TONG"] != "Hoan_Thanh")
+    )
+
+    st.subheader("📊 KẾT QUẢ BÁO CÁO")
+
+    for _, r in df.iterrows():
+        han = r["HAN_CHOT"].strftime("%d/%m/%Y") if pd.notna(r["HAN_CHOT"]) else "—"
+        flag = " ⚠️ QUÁ HẠN" if r["QUA_HAN"] else ""
+
+        st.markdown(
+            f"""
+**- {r.get("TEN_VIEC","")}**  
+• Trạng thái: `{r.get("TRANG_THAI_TONG","")}`{flag}  
+• Hạn: **{han}**  
+• Vướng mắc: {r.get("VUONG_MAC","")}  
+• Đề xuất: {r.get("DE_XUAT","")}
+---
+"""
+        )
 
 # =====================================================
-# TAB 3 → 8 – CÁC DỮ LIỆU GỐC
+# GIAO DIỆN CHÍNH
 # =====================================================
-with tabs[2]:
-    st.dataframe(all_sheets["1_NHAN_SU"], use_container_width=True)
+st.title("🗂️ Hệ thống Quản lý Công việc EVNGENCO1")
 
-with tabs[3]:
-    st.dataframe(all_sheets["2_DON_VI"], use_container_width=True)
+with st.spinner("Đang tải dữ liệu Google Sheet..."):
+    all_sheets, sheet_errors = load_all_sheets()
 
-with tabs[4]:
-    st.dataframe(all_sheets["3_VAN_BAN"], use_container_width=True)
+if sheet_errors:
+    st.warning("⚠️ Một số sheet có cấu trúc chưa chuẩn nhưng hệ thống đã tự bỏ qua:")
+    for k in sheet_errors:
+        st.write(f"- {k}")
 
-with tabs[5]:
-    st.dataframe(all_sheets["4_DU_AN"], use_container_width=True)
+tabs = st.tabs(SHEET_TABS + ["📊 BÁO CÁO"])
 
-with tabs[6]:
-    st.dataframe(all_sheets["5_GOI_THAU"], use_container_width=True)
+# =====================================================
+# TAB DỮ LIỆU GỐC
+# =====================================================
+for idx, tab_name in enumerate(SHEET_TABS):
+    with tabs[idx]:
+        st.header(tab_name)
+        df = all_sheets[tab_name]
+        st.data_editor(df, num_rows="dynamic", use_container_width=True)
 
-with tabs[7]:
-    st.dataframe(all_sheets["6_HOP_DONG"], use_container_width=True)
+# =====================================================
+# TAB BÁO CÁO
+# =====================================================
+with tabs[-1]:
+    st.header("📊 BÁO CÁO CÔNG VIỆC")
 
-with tabs[8]:
-    st.dataframe(all_sheets["9_CAU_HINH"], use_container_width=True)
-    st.markdown("---")
-    st.dataframe(all_sheets["11_CHAT_GEMINI"], use_container_width=True)
+    df_cv = all_sheets["7_CONG_VIEC"]
+
+    col1, col2 = st.columns(2)
+    with col1:
+        tu_ngay = st.date_input("Từ ngày", datetime.now() - timedelta(days=7))
+    with col2:
+        den_ngay = st.date_input("Đến ngày", datetime.now())
+
+    def pick(col):
+        if col in df_cv.columns:
+            return ["Tất cả"] + sorted(df_cv[col].dropna().unique().tolist())
+        return ["Tất cả"]
+
+    col3, col4, col5 = st.columns(3)
+    with col3:
+        id_du_an = st.selectbox("ID Dự án", pick("IDDA_DU_AN"))
+    with col4:
+        id_goi_thau = st.selectbox("ID Gói thầu", pick("IDGT_GOI_THAU"))
+    with col5:
+        id_hop_dong = st.selectbox("ID Hợp đồng", pick("IDHD_HOP_DONG"))
+
+    if st.button("📊 TẠO BÁO CÁO"):
+        generate_report(
+            df_cv,
+            pd.to_datetime(tu_ngay),
+            pd.to_datetime(den_ngay),
+            id_du_an,
+            id_goi_thau,
+            id_hop_dong
+        )
