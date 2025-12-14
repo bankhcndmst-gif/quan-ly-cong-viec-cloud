@@ -7,9 +7,10 @@ from datetime import datetime, timedelta
 
 from utils import (
     get_display_list_multi,
-    lookup_display
-    get_unique_list
+    lookup_display,
+    get_unique_list   # ✅ thêm dòng này
 )
+
 from gsheet import connect_gsheet
 import pandas as pd
 
