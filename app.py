@@ -38,9 +38,3 @@ def load_data_from_gsheets():
     except Exception as e:
         st.error(f"Lỗi kết nối hoặc cấu hình: Vui lòng kiểm tra file secrets.toml và quyền chia sẻ Google Sheet. Chi tiết: {e}")
         return None
-
-# ----------------------------------------------------
-# PHẦN CÒN LẠI CỦA APP.PY VẪN GIỮ NGUYÊN
-# ----------------------------------------------------
-data_sheets = load_data_from_gsheets()
-# ... (phần còn lại của code)
