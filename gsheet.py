@@ -1,55 +1,53 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
-from utils import normalize_columns, remove_duplicate_and_empty_cols, parse_dates
+import gspread
+from google.oauth2.service_account import Credentials
+
+from utils import remove_duplicate_and_empty_cols, parse_dates
 
 # =========================================================
-# 🔌 KẾT NỐI GOOGLE SHEET (CHUẨN STREAMLIT CLOUD)
+# 🔌 KẾT NỐI GOOGLE SHEET (CHUẨN)
 # =========================================================
+def connect_gsheet():
+    creds_dict = dict(st.secrets["gdrive"])
 
-def get_connection():
-    """
-    Lấy connection Google Sheets theo chuẩn Streamlit Cloud.
-    KHÔNG dùng st.secrets["gdrive"].
-    """
-    return st.connection("gsheets", type=GSheetsConnection)
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    return gspread.authorize(creds)
 
 # =========================================================
-# 📥 TẢI TOÀN BỘ SHEET
+# 📥 LOAD TOÀN BỘ SHEET
 # =========================================================
-
-@st.cache_data(show_spinner=False, ttl=60)
+@st.cache_data(ttl=60, show_spinner=False)
 def load_all_sheets() -> dict:
-    """
-    Đọc toàn bộ các worksheet trong Google Spreadsheet.
-    Trả về: dict {sheet_name: DataFrame}
-    """
-    all_data = {}
-
     try:
-        conn = get_connection()
-        sheet_names = conn.list_worksheets()
+        client = connect_gsheet()
+        spreadsheet_id = st.secrets["gdrive"]["spreadsheet_id"]
 
-        for sheet_name in sheet_names:
-            try:
-                df = conn.read(
-                    worksheet=sheet_name,
-                    ttl=0
-                )
+        sh = client.open_by_key(spreadsheet_id)
 
-                # Nếu sheet trống hoàn toàn
-                if df.empty and len(df.columns) == 0:
-                    all_data[sheet_name] = pd.DataFrame()
-                    continue
+        all_data = {}
 
-                # ==== LÀM SẠCH DỮ LIỆU (GIỮ LOGIC CŨ CỦA ANH) ====
-                df = remove_duplicate_and_empty_cols(df)
-                df = parse_dates(df)
+        for ws in sh.worksheets():
+            raw = ws.get_all_values()
 
-                all_data[sheet_name] = df
+            if not raw:
+                all_data[ws.title] = pd.DataFrame()
+                continue
 
-            except Exception as e:
-                st.warning(f"⚠️ Không đọc được sheet `{sheet_name}`: {e}")
+            headers = raw[0]
+            rows = raw[1:]
+
+            df = pd.DataFrame(rows, columns=headers)
+
+            df = remove_duplicate_and_empty_cols(df)
+            df = parse_dates(df)
+
+            all_data[ws.title] = df
 
         return all_data
 
@@ -58,31 +56,16 @@ def load_all_sheets() -> dict:
         return {}
 
 # =========================================================
-# 💾 GHI ĐÈ TOÀN BỘ SHEET (RAW SAVE)
+# 💾 GHI ĐÈ SHEET
 # =========================================================
-
 def save_raw_sheet(sheet_name: str, df_new: pd.DataFrame):
-    """
-    Ghi đè toàn bộ DataFrame về worksheet.
-    Dùng cho ADMIN + data_editor.
-    """
-    try:
-        conn = get_connection()
+    client = connect_gsheet()
+    spreadsheet_id = st.secrets["gdrive"]["spreadsheet_id"]
 
-        # Chuẩn hoá dữ liệu trước khi ghi
-        df_save = df_new.copy()
+    sh = client.open_by_key(spreadsheet_id)
+    ws = sh.worksheet(sheet_name)
 
-        for col in df_save.columns:
-            # Datetime → string
-            if pd.api.types.is_datetime64_any_dtype(df_save[col]):
-                df_save[col] = df_save[col].dt.strftime("%Y-%m-%d").fillna("")
-            else:
-                df_save[col] = df_save[col].fillna("")
+    df_save = df_new.fillna("")
 
-        conn.update(
-            worksheet=sheet_name,
-            data=df_save
-        )
-
-    except Exception as e:
-        raise RuntimeError(f"Lỗi ghi Sheet `{sheet_name}`: {e}")
+    ws.clear()
+    ws.update([df_save.columns.tolist()] + df_save.values.tolist())
