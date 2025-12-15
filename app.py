@@ -56,48 +56,69 @@ if "current_user" not in st.session_state:
 if "user_role" not in st.session_state:  # <-- Biến lưu vai trò
     st.session_state.user_role = ""
 
-# --- HÀM XỬ LÝ ĐĂNG NHẬP ---
+# --- HÀM XỬ LÝ ĐĂNG NHẬP (PHIÊN BẢN FIX LỖI TỪ ẢNH) ---
 def login_logic(username, password):
+    # 1. Lấy dữ liệu
     df_users = get_data_from_google_sheet("1_NHAN_SU")
-    df_users.columns = df_users.columns.str.strip() # Xóa khoảng trắng thừa ở tên cột
     
-    # Kiểm tra đủ cột chưa
-    required_cols = ['GMAIL', 'Password', 'HO_TEN', 'VAI_TRO']
-    for col in required_cols:
-        if col not in df_users.columns:
-            st.error(f"Thiếu cột '{col}' trong Google Sheet!")
-            return
+    # [DEBUG QUAN TRỌNG] In ra để xem Code có đọc đủ cột không
+    # Nếu danh sách này không có 'GMAIL', nghĩa là code kết nối dữ liệu bị dừng ở cột trống
+    st.write("📋 Các cột máy đọc được:", df_users.columns.tolist())
+    
+    # 2. CHUẨN HÓA TÊN CỘT (Để xử lý việc 'Password' vs 'PASSWORD')
+    # Code này sẽ đổi toàn bộ tên cột thành CHỮ HOA và XÓA KHOẢNG TRẮNG
+    df_users.columns = df_users.columns.str.strip().str.upper()
+    
+    # Kiểm tra lại sau khi chuẩn hóa
+    if 'GMAIL' not in df_users.columns:
+        st.error("❌ Lỗi: Code không đọc được cột 'GMAIL'. Có thể do cột này nằm quá xa hoặc bị ngắt bởi cột trống.")
+        return
+    
+    if 'PASSWORD' not in df_users.columns: # Vì đã upper() nên tìm PASSWORD
+        st.error("❌ Lỗi: Không tìm thấy cột 'Password' (Code đang tìm 'PASSWORD').")
+        return
 
-    # Kiểm tra User/Pass
-    username = str(username).strip()
-    user_row = df_users[df_users['GMAIL'].astype(str).str.strip() == username]
+    # 3. LOGIC SO SÁNH (Loại bỏ mọi khả năng lỗi do dấu cách)
+    
+    # Làm sạch dữ liệu nhập vào (chữ thường + xóa cách)
+    input_email_clean = str(username).strip().lower()
+    input_pass_clean = str(password).strip()
+    
+    # Tạo cột phụ chứa Email đã làm sạch để so sánh
+    df_users['GMAIL_CLEAN'] = df_users['GMAIL'].astype(str).str.strip().str.lower()
+    
+    # Tìm dòng dữ liệu khớp Email
+    user_row = df_users[df_users['GMAIL_CLEAN'] == input_email_clean]
     
     if not user_row.empty:
-        stored_password = user_row.iloc[0]['Password']
-        if str(stored_password).strip() == str(password).strip():
-            
-            # --- ĐĂNG NHẬP THÀNH CÔNG ---
+        # Lấy mật khẩu từ file (Lưu ý: Cột giờ tên là PASSWORD do bước 2)
+        stored_password = str(user_row.iloc[0]['PASSWORD']).strip()
+        
+        # So sánh mật khẩu
+        if stored_password == input_pass_clean:
+            # --- THÀNH CÔNG ---
             st.session_state.logged_in = True
-            st.session_state.current_user = user_row.iloc[0]['HO_TEN']
             
-            # Lấy vai trò và chuẩn hóa về chữ in hoa (để tránh lỗi Admin/admin)
-            role = str(user_row.iloc[0]['VAI_TRO']).strip().upper()
-            st.session_state.user_role = role
+            # Lấy tên hiển thị
+            if 'HO_TEN' in df_users.columns:
+                st.session_state.current_user = user_row.iloc[0]['HO_TEN']
+            else:
+                st.session_state.current_user = "User"
             
-            st.success(f"Xin chào {role}: {st.session_state.current_user}")
+            # Lấy vai trò (VAI_TRO)
+            if 'VAI_TRO' in df_users.columns:
+                st.session_state.user_role = str(user_row.iloc[0]['VAI_TRO']).strip().upper()
+            else:
+                st.session_state.user_role = "NHAN_VIEN"
+                
+            st.success("✅ Đăng nhập thành công!")
             time.sleep(1)
             st.rerun()
         else:
-            st.error("Sai mật khẩu!")
+            st.error(f"❌ Sai mật khẩu! (Hệ thống nhận: {input_pass_clean})")
     else:
-        st.error("Email không tồn tại!")
-
-def logout():
-    st.session_state.logged_in = False
-    st.session_state.current_user = ""
-    st.session_state.user_role = ""
-    st.rerun()
-
+        st.error(f"❌ Email không tồn tại: '{input_email_clean}'")
+        st.write("Danh sách Email hệ thống đang có:", df_users['GMAIL_CLEAN'].tolist())
 # ==========================================
 # GIAO DIỆN CHÍNH (MAIN UI)
 # ==========================================
@@ -184,3 +205,4 @@ else:
             if 'Password' in df_users_view.columns:
                 df_users_view = df_users_view.drop(columns=['Password']) # Bảo mật: Xóa cột pass trước khi hiện
             st.dataframe(df_users_view)
+
