@@ -3,11 +3,9 @@ import pandas as pd
 from datetime import datetime
 from gsheet import load_all_sheets, save_raw_sheet
 from utils import get_display_list_multi, lookup_display
-from config import LINK_CONFIG_RAW
-
 
 # =========================================================
-# ✅ TAB TRAO ĐỔI CÔNG VIỆC
+# ✅ TAB TRAO ĐỔI CÔNG VIỆC (ĐÃ FIX LỖI THIẾU CỘT)
 # =========================================================
 def render_chat_tab():
     st.header("💬 Trao đổi công việc")
@@ -16,9 +14,15 @@ def render_chat_tab():
     # ✅ Tải dữ liệu
     # -----------------------------------------------------
     all_sheets = load_all_sheets()
-    df_cv = all_sheets["7_CONG_VIEC"].copy()
-    df_chat = all_sheets["10_TRAO_DOI"].copy()
-    df_ns = all_sheets["1_NHAN_SU"].copy()
+    df_cv = all_sheets.get("7_CONG_VIEC", pd.DataFrame()).copy()
+    df_chat = all_sheets.get("10_TRAO_DOI", pd.DataFrame()).copy()
+    df_ns = all_sheets.get("1_NHAN_SU", pd.DataFrame()).copy()
+
+    # 🛠️ FIX LỖI KEY ERROR: Tự động thêm cột nếu thiếu
+    required_cols = ["ID_CONG_VIEC", "NGUOI_GUI", "NOI_DUNG", "THOI_GIAN", "FILE_DINH_KEM"]
+    for col in required_cols:
+        if col not in df_chat.columns:
+            df_chat[col] = "" # Tạo cột trống nếu chưa có
 
     if df_cv.empty:
         st.warning("Chưa có công việc nào.")
@@ -45,7 +49,9 @@ def render_chat_tab():
     # -----------------------------------------------------
     # ✅ Lọc lịch sử chat theo ID công việc
     # -----------------------------------------------------
-    df_chat_filtered = df_chat[df_chat["ID_CONG_VIEC"] == selected_cv_id]
+    # Chuyển về string để so sánh an toàn
+    df_chat["ID_CONG_VIEC"] = df_chat["ID_CONG_VIEC"].astype(str)
+    df_chat_filtered = df_chat[df_chat["ID_CONG_VIEC"] == str(selected_cv_id)]
 
     if df_chat_filtered.empty:
         st.info("Chưa có trao đổi nào.")
@@ -109,6 +115,11 @@ def render_chat_tab():
             "THOI_GIAN": datetime.now().strftime("%d/%m/%Y %H:%M"),
             "FILE_DINH_KEM": file_dinh_kem,
         }
+
+        # Đảm bảo DataFrame chat có đủ cột trước khi thêm
+        for col in required_cols:
+             if col not in df_chat.columns:
+                 df_chat[col] = ""
 
         df_new = df_chat.copy()
         df_new.loc[len(df_new)] = new_row
