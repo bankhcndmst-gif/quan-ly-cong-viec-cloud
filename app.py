@@ -2,7 +2,23 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import time
+# Thêm dòng này lên đầu file app.py cùng các dòng import khác
+from streamlit_gsheets import GSheetsConnection 
 
+# --- HÀM KẾT NỐI DỮ LIỆU THẬT ---
+def get_data_from_google_sheet(sheet_name):
+    try:
+        # Tạo kết nối
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        
+        # Đọc dữ liệu (ttl=0 để luôn lấy mới nhất, không lưu cache cũ)
+        df = conn.read(worksheet=sheet_name, ttl=0)
+        
+        # Nếu đọc được, trả về dataframe
+        return df
+    except Exception as e:
+        st.error(f"Lỗi kết nối Google Sheet: {e}")
+        return pd.DataFrame() # Trả về bảng rỗng nếu lỗi
 # --- GIẢ LẬP KẾT NỐI DỮ LIỆU ---
 def get_data_from_google_sheet(sheet_name):
     # Thay code này bằng code kết nối thực tế của bạn
@@ -205,4 +221,5 @@ else:
             if 'Password' in df_users_view.columns:
                 df_users_view = df_users_view.drop(columns=['Password']) # Bảo mật: Xóa cột pass trước khi hiện
             st.dataframe(df_users_view)
+
 
