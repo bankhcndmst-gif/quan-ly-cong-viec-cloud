@@ -1,9 +1,64 @@
 import pandas as pd
 import streamlit as st
 from datetime import datetime
+import re
 
 # =========================================================
-# 🛠️ CÁC HÀM XỬ LÝ DỮ LIỆU BỔ TRỢ (UTILITIES)
+# 🧹 PHẦN 1: CÁC HÀM XỬ LÝ DỮ LIỆU (CHO GSHEET.PY)
+# =========================================================
+
+def normalize_columns(df):
+    """Chuẩn hóa tên cột: Viết hoa, bỏ dấu, thay khoảng trắng bằng _"""
+    if df.empty: return df
+    
+    new_cols = []
+    for col in df.columns:
+        # Bỏ dấu tiếng Việt
+        s = str(col).strip().upper()
+        s = re.sub(r'[ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴ]', 'A', s)
+        s = re.sub(r'[ÈÉẸẺẼÊỀẾỆỂỄ]', 'E', s)
+        s = re.sub(r'[ÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠ]', 'O', s)
+        s = re.sub(r'[ÌÍỊỈĨ]', 'I', s)
+        s = re.sub(r'[ÙÚỤỦŨƯỪỨỰỬỮ]', 'U', s)
+        s = re.sub(r'[ỲÝỴỶỸ]', 'Y', s)
+        s = re.sub(r'[Đ]', 'D', s)
+        # Thay ký tự đặc biệt bằng _
+        s = re.sub(r'[^A-Z0-9_]', '_', s)
+        # Xóa _ thừa
+        s = re.sub(r'_+', '_', s)
+        s = s.strip('_')
+        new_cols.append(s)
+    
+    df.columns = new_cols
+    return df
+
+def remove_duplicate_and_empty_cols(df):
+    """Xóa cột trùng tên và cột Unnamed"""
+    if df.empty: return df
+    
+    # 1. Xóa cột trùng tên (giữ cột đầu tiên)
+    df = df.loc[:, ~df.columns.duplicated()]
+    
+    # 2. Xóa cột Unnamed hoặc trống
+    cols_to_keep = [c for c in df.columns if "UNNAMED" not in str(c).upper() and str(c).strip() != ""]
+    return df[cols_to_keep]
+
+def parse_dates(df, date_cols=None):
+    """Chuyển đổi các cột ngày tháng sang datetime object"""
+    if df.empty: return df
+    
+    # Nếu không chỉ định cột, tự tìm cột có chữ NGAY, HAN, THOI_GIAN
+    if not date_cols:
+        date_cols = [c for c in df.columns if any(x in c for x in ['NGAY', 'HAN', 'THOI_GIAN'])]
+    
+    for col in date_cols:
+        if col in df.columns:
+            # Ép kiểu sang datetime, lỗi thì biến thành NaT
+            df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
+    return df
+
+# =========================================================
+# 🎨 PHẦN 2: CÁC HÀM HIỂN THỊ & FORMAT (CHO GIAO DIỆN)
 # =========================================================
 
 def format_date_vn(date_obj):
@@ -11,15 +66,13 @@ def format_date_vn(date_obj):
     if pd.isnull(date_obj):
         return ""
     try:
-        # Nếu là chuỗi, thử parse
+        # Nếu là chuỗi
         if isinstance(date_obj, str):
-            # Nếu chuỗi rỗng
             if not date_obj.strip(): return ""
-            # Thử convert sang datetime rồi format lại
             temp = pd.to_datetime(date_obj, dayfirst=True, errors='coerce')
             if pd.notnull(temp):
                 return temp.strftime("%d/%m/%Y")
-            return date_obj # Trả về nguyên gốc nếu không parse được
+            return date_obj
             
         # Nếu là datetime object
         if hasattr(date_obj, "strftime"):
@@ -36,21 +89,19 @@ def get_unique_list(df, col_name):
     return df[col_name].dropna().unique().tolist()
 
 def lookup_display(id_val, ref_df, id_col, display_cols):
-    """Tìm ID và trả về Tên hiển thị (Ví dụ: ID001 -> Nguyễn Văn A)."""
+    """Tìm ID và trả về Tên hiển thị."""
     if pd.isnull(id_val) or str(id_val).strip() == "":
         return ""
         
     if ref_df.empty or id_col not in ref_df.columns:
         return str(id_val)
         
-    # Tìm dòng có ID khớp
-    # Chuyển cả 2 về string để so sánh cho chắc ăn
+    # Chuyển về string để so sánh
     row = ref_df[ref_df[id_col].astype(str) == str(id_val)]
     
     if row.empty:
         return str(id_val)
     
-    # Ghép các cột hiển thị (VD: HOTEN + CHUCVU)
     displays = []
     for col in display_cols:
         if col in row.columns:
@@ -63,37 +114,32 @@ def lookup_display(id_val, ref_df, id_col, display_cols):
 def get_display_list_multi(df, id_col, cols, prefix="Chọn..."):
     """
     Tạo danh sách hiển thị cho Dropdown.
-    Trả về: (list_hien_thi, dictionary_map)
     """
     if df.empty:
         return [prefix], {}
 
     display_list = [prefix]
-    mapping = {} # Key: Tên hiển thị -> Value: ID thực
+    mapping = {}
 
     for _, row in df.iterrows():
-        # Lấy ID
         id_val = row.get(id_col, "")
         if pd.isnull(id_val) or str(id_val).strip() == "":
-            continue # Bỏ qua dòng không có ID
+            continue
             
-        # Tạo chuỗi hiển thị: "Tên việc (Hạn chót)"
         parts = []
         for col in cols:
             if col in df.columns:
                 val = row[col]
                 
-                # 🛠️ FIX LỖI NAT TYPE Ở ĐÂY:
-                # Kiểm tra xem có phải cột ngày tháng không
+                # Format ngày tháng an toàn
                 if pd.api.types.is_datetime64_any_dtype(df[col]) or isinstance(val, (pd.Timestamp, datetime)):
-                    val = format_date_vn(val) # Dùng hàm an toàn ở trên
+                    val = format_date_vn(val)
                 
                 if pd.notnull(val) and str(val).strip() != "":
                     parts.append(str(val))
         
         display_text = " - ".join(parts) if parts else str(id_val)
         
-        # Lưu vào map
         display_list.append(display_text)
         mapping[display_text] = id_val
 
