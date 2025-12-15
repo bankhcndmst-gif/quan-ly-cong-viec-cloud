@@ -9,48 +9,49 @@ def render_data_manager_tab():
     try:
         all_sheets = load_all_sheets()
     except Exception as e:
-        st.error(f"Lỗi kết nối Google Sheet: {e}")
+        st.error(f"Lỗi kết nối: {e}")
+        return
+
+    if not all_sheets:
+        st.warning("Không đọc được dữ liệu nào từ file Sheet.")
         return
 
     # 2. Chọn Sheet
-    if not all_sheets:
-        st.warning("Không tìm thấy dữ liệu.")
-        return
-
     sheet_names = list(all_sheets.keys())
-    selected_sheet = st.selectbox("Chọn bảng dữ liệu:", sheet_names)
+    # Ưu tiên chọn tab đang bị lỗi để kiểm tra
+    index_default = 0
+    if "4_DU_AN" in sheet_names:
+        index_default = sheet_names.index("4_DU_AN")
+        
+    selected_sheet = st.selectbox("Chọn bảng dữ liệu:", sheet_names, index=index_default)
     
+    # 3. Lấy dữ liệu
     df = all_sheets.get(selected_sheet, pd.DataFrame())
 
-    # 3. Hiển thị & Sửa lỗi
     st.markdown(f"### Đang chỉnh sửa: `{selected_sheet}`")
     
-    # Nếu sheet chưa có dữ liệu, tạo một DataFrame rỗng có cột mẫu để không bị lỗi
-    if df.empty:
-        st.info("⚠️ Bảng này đang trống. Hãy nhập dòng đầu tiên làm tiêu đề.")
-        # Tạo bảng tạm để người dùng nhập
-        df = pd.DataFrame(columns=["COT_1", "COT_2", "COT_3"])
-
-    # Xử lý các cột ngày tháng để hiển thị string cho dễ sửa (tránh lỗi hiển thị)
-    df_display = df.copy()
-    for col in df_display.columns:
-        if pd.api.types.is_datetime64_any_dtype(df_display[col]):
-            df_display[col] = df_display[col].dt.strftime('%Y-%m-%d').fillna("")
-
-    # 4. Data Editor
+    # 4. Hiển thị Data Editor
+    # Nếu thực sự trống (0 dòng, 0 cột), tạo khung tạm
+    if df.empty and len(df.columns) == 0:
+        st.warning("⚠️ Bảng này chưa có tiêu đề cột.")
+        df = pd.DataFrame(columns=["Cột A", "Cột B", "Cột C"])
+    
+    # Ép kiểu sang string để hiển thị an toàn (tránh lỗi ngày tháng hiển thị)
+    df_display = df.astype(str)
+    
     edited_df = st.data_editor(
         df_display,
         num_rows="dynamic",
         use_container_width=True,
-        key=f"editor_{selected_sheet}"
+        key=f"editor_{selected_sheet}" 
     )
 
-    # 5. Lưu
+    # 5. Nút Lưu
     if st.button("💾 Lưu thay đổi", type="primary"):
         try:
             save_raw_sheet(selected_sheet, edited_df)
             st.success("✅ Đã lưu thành công!")
-            st.cache_data.clear() # Xóa cache để cập nhật
+            st.cache_data.clear()
             st.rerun()
         except Exception as e:
             st.error(f"❌ Lỗi khi lưu: {e}")
