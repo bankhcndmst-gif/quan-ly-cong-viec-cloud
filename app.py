@@ -1,169 +1,150 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
+import time
 
-# =========================================================
-# ⚙️ CẤU HÌNH TRANG (PHẢI ĐỂ ĐẦU TIÊN)
-# =========================================================
-st.set_page_config(
-    page_title="Quản lý công việc EVNGENCO1",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# --- GIẢ LẬP KẾT NỐI DỮ LIỆU (Bạn thay phần này bằng code kết nối Google Sheets thật) ---
+# Ví dụ: Dùng gspread hoặc streamlit-google-sheets
+def get_data_from_google_sheet(sheet_name):
+    # Đây là hàm giả lập để code chạy được ngay.
+    # Trong thực tế, bạn thay bằng lệnh: conn.read(worksheet=sheet_name)
+    
+    if sheet_name == "1_NHAN_SU":
+        # Dữ liệu này chỉ Python đọc, KHÔNG hiển thị ra màn hình
+        return pd.DataFrame({
+            "Username": ["admin", "nhanvien1"],
+            "Password": ["123456", "123"],
+            "HoTen": ["Quản trị viên", "Nguyễn Văn A"]
+        })
+    elif sheet_name == "2_CONG_VIEC":
+        return pd.DataFrame({
+            "Mã CV": ["CV01", "CV02"],
+            "Tên việc": ["Báo cáo tuần", "Kiểm tra server"],
+            "Trạng thái": ["Đang làm", "Hoàn thành"],
+            "Người phụ trách": ["Nguyễn Văn A", "Quản trị viên"]
+        })
+    elif sheet_name == "3_CHAT":
+        # Nếu chưa có trong session, tạo dữ liệu mẫu
+        if "chat_data" not in st.session_state:
+            st.session_state.chat_data = pd.DataFrame([
+                {"Time": "10:00", "User": "Quản trị viên", "Message": "Chào mọi người"}
+            ])
+        return st.session_state.chat_data
+    return pd.DataFrame()
 
-# =========================================================
-# 🔒 HỆ THỐNG ĐĂNG NHẬP (BẢO MẬT)
-# =========================================================
-def check_password():
-    """Kiểm tra mật khẩu trước khi cho vào App"""
-    # 1. Khởi tạo trạng thái đăng nhập
-    if "password_correct" not in st.session_state:
-        st.session_state.password_correct = False
-
-    # 2. Hàm xử lý khi bấm nút Đăng nhập
-    def password_entered():
-        # Lấy mật khẩu từ file secrets.toml
-        # Lưu ý: Bạn phải có dòng PASSWORD = "admin" trong secrets
-        if st.session_state["password"] == st.secrets["general"]["PASSWORD"]:
-            st.session_state.password_correct = True
-            del st.session_state["password"]  # Xóa pass khỏi bộ nhớ ngay
-        else:
-            st.session_state.password_correct = False
-
-    # 3. Nếu đã đăng nhập thành công -> Trả về True (Cho vào)
-    if st.session_state.password_correct:
-        return True
-
-    # 4. Giao diện đăng nhập
-    st.markdown("## 🔒 Yêu cầu đăng nhập")
-    st.text_input(
-        "Nhập mật khẩu quản trị:", 
-        type="password", 
-        on_change=password_entered, 
-        key="password"
+def save_message_to_sheet(user, message):
+    # Hàm này sẽ ghi vào Google Sheet thật
+    # Ở đây mình ghi vào biến tạm trong Session State
+    new_msg = {
+        "Time": datetime.now().strftime("%H:%M:%S"), 
+        "User": user, 
+        "Message": message
+    }
+    st.session_state.chat_data = pd.concat(
+        [st.session_state.chat_data, pd.DataFrame([new_msg])], 
+        ignore_index=True
     )
+
+# --- CẤU HÌNH TRANG ---
+st.set_page_config(page_title="Hệ thống Quản lý Công việc", layout="wide")
+
+# --- KHỞI TẠO SESSION STATE (Lưu trạng thái đăng nhập) ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "current_user" not in st.session_state:
+    st.session_state.current_user = ""
+
+# --- HÀM XỬ LÝ ĐĂNG NHẬP ---
+def login_logic(username, password):
+    # 1. Lấy dữ liệu mật (Chỉ lấy về biến df_users, không in ra)
+    df_users = get_data_from_google_sheet("1_NHAN_SU")
     
-    # Hiển thị lỗi nếu nhập sai
-    if "password_correct" in st.session_state and not st.session_state.password_correct:
-        # Chỉ báo lỗi nếu người dùng đã nhập gì đó (để tránh báo lỗi khi vừa mở app)
-        if "password" in st.session_state: 
-             pass # Logic trên đã xóa key 'password' nếu đúng, nên nếu còn key này nghĩa là sai hoặc chưa nhập
-             
-    # Gợi ý nhỏ nếu chưa cấu hình
-    try:
-        if "PASSWORD" not in st.secrets["general"]:
-            st.error("⚠️ Cảnh báo: Chưa cài đặt PASSWORD trong secrets.toml")
-    except:
-        pass
-
-    return False
-
-# 🛑 CHẶN CỬA: Nếu chưa nhập đúng mật khẩu thì DỪNG LẠI NGAY
-if not check_password():
-    st.stop()
-
-# =========================================================
-# 📥 IMPORT CÁC MODULE CHỨC NĂNG
-# (Chỉ import sau khi đã đăng nhập thành công để an toàn)
-# =========================================================
-try:
-    from new_task import render_new_task_tab
-    from report import render_report_tab
-    from data_manager import render_data_manager_tab
+    # 2. Kiểm tra khớp User/Pass
+    # Tìm dòng có Username trùng
+    user_row = df_users[df_users['GMAIL'] == username]
     
-    # Các module khác (Nếu bạn chưa có file thì tạm thời comment lại để không lỗi)
-    # from guide import render_guide_tab 
-    # from chat_work import render_chat_work_tab
-    # from chat_gemini import render_chat_gemini_tab
-    # from ai_memory import render_memory_tab
-    # from json_import import render_json_import_tab
-    
-except ImportError as e:
-    st.error(f"⚠️ Lỗi thiếu file module: {e}")
-    st.stop()
+    if not user_row.empty:
+        # Nếu tìm thấy user, kiểm tra password
+        stored_password = user_row.iloc[0]['Password']
+        if str(stored_password) == str(password):
+            st.session_state.logged_in = True
+            st.session_state.current_user = user_row.iloc[0]['HO_TEN']
+            st.success("Đăng nhập thành công!")
+            time.sleep(1)
+            st.rerun() # Tải lại trang để vào giao diện chính
+        else:
+            st.error("Sai mật khẩu!")
+    else:
+        st.error("Tài khoản không tồn tại!")
 
-# =========================================================
-# 🎨 GIAO DIỆN CHÍNH (SIDEBAR MENU)
-# =========================================================
-
-# 1. Logo (Nếu có file logo.png)
-try:
-    st.sidebar.image("logo.png", use_column_width=True)
-except:
-    st.sidebar.markdown("## ⚡ EVNGENCO1")
-
-st.sidebar.markdown("---")
-
-# 2. Menu Chức Năng
-menu = st.sidebar.radio(
-    "📌 CHỨC NĂNG",
-    [
-        "Hướng dẫn sử dụng",         # 0
-        "Giao việc bằng Gemini",     # 1
-        "Giao việc thủ công",        # 2
-        "Báo cáo công việc",         # 3
-        "Trao đổi công việc",        # 4
-        "Hỏi – đáp Gemini",          # 5
-        "Trí nhớ AI",                # 6
-        "Quản lý dữ liệu gốc",       # 7
-        "Nhập liệu từ JSON",         # 8
-    ],
-    index=2 # Mặc định mở tab Giao việc thủ công
-)
-
-# 3. Nút Làm mới dữ liệu (Quan trọng)
-st.sidebar.markdown("---")
-if st.sidebar.button("🔄 Làm mới dữ liệu", type="primary"):
-    st.cache_data.clear()
+# --- HÀM XỬ LÝ ĐĂNG XUẤT ---
+def logout():
+    st.session_state.logged_in = False
+    st.session_state.current_user = ""
     st.rerun()
 
-# 4. Footer
-st.sidebar.markdown("---")
-st.sidebar.caption("Phiên bản: Cloud 2.0")
-st.sidebar.caption("Dev: Ban KHCN&DMST")
+# ==========================================
+# GIAO DIỆN CHÍNH (MAIN UI)
+# ==========================================
 
-# =========================================================
-# 🚀 ĐIỀU HƯỚNG NỘI DUNG (ROUTING)
-# =========================================================
+if not st.session_state.logged_in:
+    # ----------------------------------
+    # TRƯỜNG HỢP 1: CHƯA ĐĂNG NHẬP
+    # ----------------------------------
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.header("🔐 Đăng nhập hệ thống")
+        user_input = st.text_input("Tài khoản")
+        pass_input = st.text_input("Mật khẩu", type="password")
+        
+        if st.button("Đăng nhập", use_container_width=True):
+            login_logic(user_input, pass_input)
 
-if menu == "Hướng dẫn sử dụng":
-    st.header("📖 Hướng dẫn sử dụng")
-    st.info("Chức năng đang cập nhật...")
-    # render_guide_tab()
+else:
+    # ----------------------------------
+    # TRƯỜNG HỢP 2: ĐÃ ĐĂNG NHẬP
+    # ----------------------------------
+    
+    # Sidebar: Thông tin user & Đăng xuất
+    with st.sidebar:
+        st.write(f"Xin chào, **{st.session_state.current_user}**")
+        if st.button("Đăng xuất"):
+            logout()
+    
+    st.title("📂 Cổng thông tin nội bộ")
 
-elif menu == "Giao việc bằng Gemini":
-    st.header("🤖 Giao việc thông minh (Gemini)")
-    st.info("Chức năng đang cập nhật...")
-    # render_gemini_assign_tab()
+    # Tạo các Tab chức năng
+    tab1, tab2 = st.tabs(["📋 Danh sách Công việc", "💬 Chat Nhóm"])
 
-elif menu == "Giao việc thủ công":
-    # Gọi hàm từ file new_task.py
-    render_new_task_tab()
+    # --- TAB 1: CÔNG VIỆC ---
+    with tab1:
+        st.subheader("Tiến độ công việc")
+        # Chỉ tải dữ liệu sheet 2_CONG_VIEC
+        df_tasks = get_data_from_google_sheet("2_CONG_VIEC")
+        
+        # Hiển thị bảng công việc (có thể thêm bộ lọc nếu cần)
+        st.dataframe(df_tasks, use_container_width=True)
 
-elif menu == "Báo cáo công việc":
-    # Gọi hàm từ file report.py
-    render_report_tab()
+    # --- TAB 2: CHAT ---
+    with tab2:
+        st.subheader("Thảo luận nhóm")
+        
+        # Container chứa lịch sử chat
+        chat_container = st.container(height=400)
+        
+        # Tải dữ liệu sheet 3_CHAT
+        df_chat = get_data_from_google_sheet("3_CHAT")
+        
+        # Hiển thị lịch sử
+        with chat_container:
+            for index, row in df_chat.iterrows():
+                if row['User'] == st.session_state.current_user:
+                    st.chat_message("user").write(f"**{row['User']}** ({row['Time']}): {row['Message']}")
+                else:
+                    st.chat_message("assistant").write(f"**{row['User']}** ({row['Time']}): {row['Message']}")
 
-elif menu == "Trao đổi công việc":
-    st.header("💬 Trao đổi công việc")
-    st.info("Chức năng đang cập nhật...")
-    # render_chat_work_tab()
-
-elif menu == "Hỏi – đáp Gemini":
-    st.header("💡 Hỏi đáp với AI")
-    st.info("Chức năng đang cập nhật...")
-    # render_chat_gemini_tab()
-
-elif menu == "Trí nhớ AI":
-    st.header("🧠 Quản lý Trí nhớ AI")
-    st.info("Chức năng đang cập nhật...")
-    # render_memory_tab()
-
-elif menu == "Quản lý dữ liệu gốc":
-    # Gọi hàm từ file data_manager.py
-    render_data_manager_tab()
-
-elif menu == "Nhập liệu từ JSON":
-    st.header("📥 Nhập liệu JSON")
-    st.info("Chức năng đang cập nhật...")
-    # render_json_import_tab()
+        # Ô nhập liệu chat
+        prompt = st.chat_input("Nhập tin nhắn...")
+        if prompt:
+            save_message_to_sheet(st.session_state.current_user, prompt)
+            st.rerun() # Refresh để hiện tin nhắn mới
