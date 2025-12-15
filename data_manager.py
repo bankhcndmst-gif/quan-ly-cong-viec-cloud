@@ -1,124 +1,58 @@
 import streamlit as st
 import pandas as pd
 from gsheet import load_all_sheets, save_raw_sheet
-from utils import (
-    format_date_vn,
-    get_display_list_multi,
-)
-from config import LINK_CONFIG_RAW, DATE_COLS
 
-
-# =========================================================
-# ✅ HÀM HIỂN THỊ TAB QUẢN LÝ DỮ LIỆU GỐC
-# =========================================================
 def render_data_manager_tab():
-    st.header("📁 Quản lý dữ liệu gốc")
+    st.header("📂 Quản lý dữ liệu gốc")
 
-    # -----------------------------------------------------
-    # ✅ Tải toàn bộ dữ liệu
-    # -----------------------------------------------------
-    all_sheets = load_all_sheets()
-
-    sheet_names = list(all_sheets.keys())
-    selected_sheet = st.selectbox("Chọn sheet để quản lý:", sheet_names)
-
-    df = all_sheets[selected_sheet].copy()
-
-    if df.empty:
-        st.warning("Sheet này chưa có dữ liệu.")
+    # 1. Tải dữ liệu
+    try:
+        all_sheets = load_all_sheets()
+    except Exception as e:
+        st.error(f"Lỗi kết nối Google Sheet: {e}")
         return
 
-    st.subheader(f"📄 Dữ liệu trong sheet: **{selected_sheet}**")
+    # 2. Chọn Sheet để sửa
+    sheet_names = list(all_sheets.keys())
+    if not sheet_names:
+        st.warning("Không tìm thấy sheet nào trong file.")
+        return
 
-    # -----------------------------------------------------
-    # ✅ Hiển thị dữ liệu (có cột mô tả nếu có liên kết)
-    # -----------------------------------------------------
-    df_display = df.copy()
+    selected_sheet = st.selectbox("Chọn sheet để quản lý:", sheet_names, index=0)
+    
+    # Lấy dữ liệu của sheet đã chọn
+    df = all_sheets.get(selected_sheet, pd.DataFrame())
 
-    # Nếu sheet có cấu hình liên kết → tạo cột mô tả
-    if selected_sheet in LINK_CONFIG_RAW:
-        cfg = LINK_CONFIG_RAW[selected_sheet]
+    # 3. Hiển thị khu vực nhập liệu
+    st.markdown(f"### Đang chỉnh sửa: `{selected_sheet}`")
+    
+    if df.empty:
+        st.info("⚠️ Sheet này đang trống. Bạn hãy nhập dòng dữ liệu đầu tiên vào bảng dưới đây.")
+        # Nếu sheet trống hoàn toàn (không có cả tiêu đề), tạo tiêu đề giả để không lỗi
+        if len(df.columns) == 0:
+             df = pd.DataFrame(columns=["COT_1", "COT_2", "COT_3"])
 
-        if "LINK_COLS" in cfg:
-            for col, (ref_sheet, ref_id) in cfg["LINK_COLS"].items():
-                if col in df_display.columns:
-                    ref_df = all_sheets.get(ref_sheet, pd.DataFrame())
-                    if not ref_df.empty:
-                        df_display[col + "_MO_TA"] = df_display[col].apply(
-                            lambda x: lookup_display_safe(x, ref_df, ref_id)
-                        )
+    # 4. Hiện bảng biên tập (Data Editor)
+    # num_rows="dynamic" giúp bạn thêm/xóa dòng thoải mái
+    edited_df = st.data_editor(
+        df,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=f"editor_{selected_sheet}" # Key riêng để không bị lag
+    )
 
-    st.dataframe(df_display, use_container_width=True)
+    # 5. Nút Lưu thay đổi
+    if st.button("💾 Lưu thay đổi lên Google Sheet", type="primary"):
+        try:
+            # Lưu lên Google Sheet
+            save_raw_sheet(selected_sheet, edited_df)
+            st.success("✅ Đã lưu thành công! Đang tải lại dữ liệu...")
+            
+            # Xóa cache để App nhận dữ liệu mới ngay lập tức
+            st.cache_data.clear()
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"❌ Lỗi khi lưu: {e}")
 
-    st.markdown("---")
-    st.subheader("➕ Thêm dòng mới")
-
-    # -----------------------------------------------------
-    # ✅ Form thêm dòng mới
-    # -----------------------------------------------------
-    new_row = {}
-
-    for col in df.columns:
-        # Nếu là cột ngày → date_input
-        if col in DATE_COLS:
-            new_row[col] = st.date_input(f"{col}", value=None)
-
-        # Nếu là cột liên kết → dropdown
-        elif selected_sheet in LINK_CONFIG_RAW and \
-             "LINK_COLS" in LINK_CONFIG_RAW[selected_sheet] and \
-             col in LINK_CONFIG_RAW[selected_sheet]["LINK_COLS"]:
-
-            ref_sheet, ref_id = LINK_CONFIG_RAW[selected_sheet]["LINK_COLS"][col]
-            ref_df = all_sheets.get(ref_sheet, pd.DataFrame())
-
-            if not ref_df.empty:
-                display_list, mapping = get_display_list_multi(
-                    ref_df,
-                    id_col=ref_id,
-                    cols=LINK_CONFIG_RAW[ref_sheet]["DISPLAY_COLS"],
-                    prefix="Chọn..."
-                )
-                choice = st.selectbox(f"{col}", display_list)
-                new_row[col] = mapping.get(choice, "")
-
-            else:
-                new_row[col] = st.text_input(f"{col}")
-
-        # Cột thường → text_input
-        else:
-            new_row[col] = st.text_input(f"{col}")
-
-    # -----------------------------------------------------
-    # ✅ Nút lưu dòng mới
-    # -----------------------------------------------------
-    if st.button("✅ Thêm dòng mới", type="primary"):
-        df_new = df.copy()
-        df_new.loc[len(df_new)] = new_row
-        save_raw_sheet(selected_sheet, df_new)
-
-
-# =========================================================
-# ✅ HÀM LOOKUP AN TOÀN (KHÔNG LỖI KHI TRỐNG)
-# =========================================================
-def lookup_display_safe(id_value, df_ref, id_col):
-    """
-    Trả về mô tả từ ID, nếu không có thì trả về ID.
-    """
-    if not id_value:
-        return ""
-
-    row = df_ref[df_ref[id_col] == id_value]
-    if row.empty:
-        return id_value
-
-    row = row.iloc[0]
-    parts = [id_value]
-
-    for c in df_ref.columns:
-        if c != id_col:
-            val = row[c]
-            if isinstance(val, pd.Timestamp):
-                val = val.strftime("%d/%m/%Y")
-            parts.append(str(val))
-
-    return " | ".join(parts)
+    st.caption("Mẹo: Bấm vào dòng cuối cùng có dấu (+) để thêm dòng mới. Chọn ô vuông bên trái dòng và bấm Delete để xóa.")
