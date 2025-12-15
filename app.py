@@ -1,119 +1,169 @@
 import streamlit as st
-
-# Import các tab
-from data_manager import render_data_manager_tab
-from new_task import render_new_task_tab
-from report import render_report_tab
-from chat import render_chat_tab
-from gemini_chat import render_gemini_chat_tab
-from gemini_task_tab import render_gemini_task_tab
-from gemini_json_import import render_json_import_tab
-from memory_tab import render_memory_tab
-from guide import render_guide_tab
+import pandas as pd
 
 # =========================================================
-# ✅ CẤU HÌNH GIAO DIỆN
+# ⚙️ CẤU HÌNH TRANG (PHẢI ĐỂ ĐẦU TIÊN)
 # =========================================================
 st.set_page_config(
-    page_title="QLCV Ban KHCNĐMST",
+    page_title="Quản lý công việc EVNGENCO1",
+    page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded",
-    page_icon="🚀"
+    initial_sidebar_state="expanded"
 )
 
 # =========================================================
-# ✅ LOGO & HEADER
+# 🔒 HỆ THỐNG ĐĂNG NHẬP (BẢO MẬT)
 # =========================================================
-# Thêm logo vào đầu sidebar
-# ⚠️ Lưu ý: Bạn cần để file "logo.png" cùng thư mục với app.py
+def check_password():
+    """Kiểm tra mật khẩu trước khi cho vào App"""
+    # 1. Khởi tạo trạng thái đăng nhập
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+
+    # 2. Hàm xử lý khi bấm nút Đăng nhập
+    def password_entered():
+        # Lấy mật khẩu từ file secrets.toml
+        # Lưu ý: Bạn phải có dòng PASSWORD = "admin" trong secrets
+        if st.session_state["password"] == st.secrets["general"]["PASSWORD"]:
+            st.session_state.password_correct = True
+            del st.session_state["password"]  # Xóa pass khỏi bộ nhớ ngay
+        else:
+            st.session_state.password_correct = False
+
+    # 3. Nếu đã đăng nhập thành công -> Trả về True (Cho vào)
+    if st.session_state.password_correct:
+        return True
+
+    # 4. Giao diện đăng nhập
+    st.markdown("## 🔒 Yêu cầu đăng nhập")
+    st.text_input(
+        "Nhập mật khẩu quản trị:", 
+        type="password", 
+        on_change=password_entered, 
+        key="password"
+    )
+    
+    # Hiển thị lỗi nếu nhập sai
+    if "password_correct" in st.session_state and not st.session_state.password_correct:
+        # Chỉ báo lỗi nếu người dùng đã nhập gì đó (để tránh báo lỗi khi vừa mở app)
+        if "password" in st.session_state: 
+             pass # Logic trên đã xóa key 'password' nếu đúng, nên nếu còn key này nghĩa là sai hoặc chưa nhập
+             
+    # Gợi ý nhỏ nếu chưa cấu hình
+    try:
+        if "PASSWORD" not in st.secrets["general"]:
+            st.error("⚠️ Cảnh báo: Chưa cài đặt PASSWORD trong secrets.toml")
+    except:
+        pass
+
+    return False
+
+# 🛑 CHẶN CỬA: Nếu chưa nhập đúng mật khẩu thì DỪNG LẠI NGAY
+if not check_password():
+    st.stop()
+
+# =========================================================
+# 📥 IMPORT CÁC MODULE CHỨC NĂNG
+# (Chỉ import sau khi đã đăng nhập thành công để an toàn)
+# =========================================================
 try:
-    st.logo("logo.png", link="https://www.evngenco1.vn/")
-except Exception:
-    # Nếu không thấy ảnh thì bỏ qua, không báo lỗi
-    pass
-
-# Tiêu đề chính
-st.markdown(
-    """
-    <h3 style='text-align: center; color: #0D47A1; margin-bottom: 25px;'>
-        HỆ THỐNG QUẢN LÝ CÔNG VIỆC BAN KHCNĐMST + TRỢ LÝ GEMINI
-    </h3>
-    """, 
-    unsafe_allow_html=True
-)
+    from new_task import render_new_task_tab
+    from report import render_report_tab
+    from data_manager import render_data_manager_tab
+    
+    # Các module khác (Nếu bạn chưa có file thì tạm thời comment lại để không lỗi)
+    # from guide import render_guide_tab 
+    # from chat_work import render_chat_work_tab
+    # from chat_gemini import render_chat_gemini_tab
+    # from ai_memory import render_memory_tab
+    # from json_import import render_json_import_tab
+    
+except ImportError as e:
+    st.error(f"⚠️ Lỗi thiếu file module: {e}")
+    st.stop()
 
 # =========================================================
-# ✅ MENU CHÍNH
+# 🎨 GIAO DIỆN CHÍNH (SIDEBAR MENU)
 # =========================================================
+
+# 1. Logo (Nếu có file logo.png)
+try:
+    st.sidebar.image("logo.png", use_column_width=True)
+except:
+    st.sidebar.markdown("## ⚡ EVNGENCO1")
+
+st.sidebar.markdown("---")
+
+# 2. Menu Chức Năng
 menu = st.sidebar.radio(
     "📌 CHỨC NĂNG",
     [
-        "Hướng dẫn sử dụng",
-        "Giao việc bằng Gemini",
-        "Giao việc thủ công",
-        "Báo cáo công việc",
-        "Trao đổi công việc",
-        "Hỏi – đáp Gemini",
-        "Trí nhớ AI",
-        "Quản lý dữ liệu gốc",
-        "Nhập liệu từ JSON",
-    ]
+        "Hướng dẫn sử dụng",         # 0
+        "Giao việc bằng Gemini",     # 1
+        "Giao việc thủ công",        # 2
+        "Báo cáo công việc",         # 3
+        "Trao đổi công việc",        # 4
+        "Hỏi – đáp Gemini",          # 5
+        "Trí nhớ AI",                # 6
+        "Quản lý dữ liệu gốc",       # 7
+        "Nhập liệu từ JSON",         # 8
+    ],
+    index=2 # Mặc định mở tab Giao việc thủ công
 )
 
-# 👇👇👇 DÁN ĐOẠN NÀY VÀO ĐÂY 👇👇👇
-st.sidebar.markdown("---") # Kẻ một đường gạch ngang cho đẹp
-if st.sidebar.button("🔄 Làm mới dữ liệu"):
+# 3. Nút Làm mới dữ liệu (Quan trọng)
+st.sidebar.markdown("---")
+if st.sidebar.button("🔄 Làm mới dữ liệu", type="primary"):
     st.cache_data.clear()
     st.rerun()
-# 👆👆👆 KẾT THÚC ĐOẠN CẦN DÁN 👆👆👆
+
+# 4. Footer
+st.sidebar.markdown("---")
+st.sidebar.caption("Phiên bản: Cloud 2.0")
+st.sidebar.caption("Dev: Ban KHCN&DMST")
 
 # =========================================================
-# ✅ ĐIỀU HƯỚNG TAB
+# 🚀 ĐIỀU HƯỚNG NỘI DUNG (ROUTING)
 # =========================================================
-if menu == "Hướng dẫn sử dụng":
-    render_guide_tab()
-# ... (các dòng tiếp theo giữ nguyên)
-if menu == "Hướng dẫn sử dụng":
-    render_guide_tab()
 
-elif menu == "Quản lý dữ liệu gốc":
-    render_data_manager_tab()
+if menu == "Hướng dẫn sử dụng":
+    st.header("📖 Hướng dẫn sử dụng")
+    st.info("Chức năng đang cập nhật...")
+    # render_guide_tab()
+
+elif menu == "Giao việc bằng Gemini":
+    st.header("🤖 Giao việc thông minh (Gemini)")
+    st.info("Chức năng đang cập nhật...")
+    # render_gemini_assign_tab()
 
 elif menu == "Giao việc thủ công":
+    # Gọi hàm từ file new_task.py
     render_new_task_tab()
 
 elif menu == "Báo cáo công việc":
+    # Gọi hàm từ file report.py
     render_report_tab()
 
 elif menu == "Trao đổi công việc":
-    render_chat_tab()
+    st.header("💬 Trao đổi công việc")
+    st.info("Chức năng đang cập nhật...")
+    # render_chat_work_tab()
 
 elif menu == "Hỏi – đáp Gemini":
-    render_gemini_chat_tab()
-
-elif menu == "Giao việc bằng Gemini":
-    render_gemini_task_tab()
-
-elif menu == "Nhập liệu từ JSON":
-    render_json_import_tab()
+    st.header("💡 Hỏi đáp với AI")
+    st.info("Chức năng đang cập nhật...")
+    # render_chat_gemini_tab()
 
 elif menu == "Trí nhớ AI":
-    render_memory_tab()
+    st.header("🧠 Quản lý Trí nhớ AI")
+    st.info("Chức năng đang cập nhật...")
+    # render_memory_tab()
 
-# =========================================================
-# ✅ FOOTER (THÔNG TIN NGƯỜI THỰC HIỆN)
-# =========================================================
-st.sidebar.markdown("---")
-st.sidebar.markdown(
-    """
-    <div style='text-align: left; color: #424242; font-size: 0.9em; line-height: 1.4;'>
-        <b>Người thực hiện:</b><br>
-        Nguyễn Trọng Thắng<br><br>
-        <b>Công nghệ AI:</b><br>
-        Google Gemini Pro<br><br>
-        <i style='font-size: 0.8em; color: #757575;'>Phiên bản Cloud 1.3</i>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+elif menu == "Quản lý dữ liệu gốc":
+    # Gọi hàm từ file data_manager.py
+    render_data_manager_tab()
 
+elif menu == "Nhập liệu từ JSON":
+    st.header("📥 Nhập liệu JSON")
+    st.info("Chức năng đang cập nhật...")
+    # render_json_import_tab()
