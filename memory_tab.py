@@ -3,72 +3,67 @@ import pandas as pd
 from gsheet import load_all_sheets, save_raw_sheet
 from gemini_memory_parser import parse_memory_from_chat
 
-# =========================================================
-# ✅ TAB TRÍ NHỚ AI (ĐÃ SỬA LỖI CONFIG)
-# =========================================================
 def render_memory_tab():
     st.header("🧠 Trí nhớ AI")
 
+    # 1. Lấy API Key từ Secrets
+    api_key = st.secrets.get("general", {}).get("GEMINI_API_KEY", None)
+
     all_sheets = load_all_sheets()
-    df_memory = all_sheets["11_TRI_NHO_AI"].copy() # Lưu ý: dùng 11_TRI_NHO_AI theo config mới
-    df_config = all_sheets["8_CAU_HINH"].copy()
-
-    # -----------------------------------------------------
-    # 🛠️ LOGIC LẤY API KEY THÔNG MINH
-    # -----------------------------------------------------
-    api_key = ""
-    if "GEMINI_API_KEY" in df_config.columns:
-        val = df_config["GEMINI_API_KEY"].iloc[0]
-        if val: api_key = str(val).strip()
-
-    if not api_key and "TEN_CAU_HINH" in df_config.columns and "GIA_TRI" in df_config.columns:
-        row = df_config[df_config["TEN_CAU_HINH"].astype(str).str.contains("Gemini", case=False, na=False)]
-        if not row.empty:
-            api_key = str(row["GIA_TRI"].iloc[0]).strip()
+    
+    # 2. Fallback tìm trong Sheet (Xử lý an toàn)
+    if not api_key:
+        try:
+            df_config = all_sheets.get("8_CAU_HINH", pd.DataFrame())
+            if not df_config.empty:
+                if "GEMINI_API_KEY" in df_config.columns:
+                    api_key = str(df_config["GEMINI_API_KEY"].iloc[0]).strip()
+                elif "TEN_CAU_HINH" in df_config.columns and "GIA_TRI" in df_config.columns:
+                    row = df_config[df_config["TEN_CAU_HINH"].astype(str).str.contains("Gemini", case=False, na=False)]
+                    if not row.empty:
+                        api_key = str(row["GIA_TRI"].iloc[0]).strip()
+        except: pass
 
     if not api_key:
-        st.error("❌ Không tìm thấy API Key trong sheet 8_CAU_HINH.")
+        st.error("❌ Vui lòng thêm GEMINI_API_KEY vào secrets.toml")
         return
 
-    # -----------------------------------------------------
-    # Giao diện chính
-    # -----------------------------------------------------
-    st.subheader("✏️ Nhập mô tả để lưu vào trí nhớ AI")
-    user_message = st.text_area("Nhập nội dung (nhắc việc, họp hành...):", height=200)
-
-    if st.button("🚀 Phân tích bằng Gemini", type="primary"):
-        if not user_message.strip():
-            st.error("❌ Vui lòng nhập nội dung.")
-            return
-
-        df_parsed = parse_memory_from_chat(api_key, user_message, all_sheets)
-        if df_parsed.empty:
-            st.error("❌ Không phân tích được.")
-            return
-
-        st.session_state["memory_parsed"] = df_parsed
-        st.success("✅ Đã phân tích xong!")
+    # Giao diện
+    user_message = st.text_area("Nhập nội dung ghi nhớ:", height=200)
+    if st.button("🚀 Phân tích", type="primary"):
+        if user_message.strip():
+            df_parsed = parse_memory_from_chat(api_key, user_message, all_sheets)
+            if not df_parsed.empty:
+                st.session_state["memory_parsed"] = df_parsed
+                st.success("Đã phân tích!")
+            else:
+                st.error("Lỗi phân tích.")
 
     if "memory_parsed" in st.session_state:
-        st.subheader("📄 Bản nháp trí nhớ AI")
         df_edit = st.data_editor(st.session_state["memory_parsed"], num_rows="dynamic", use_container_width=True)
-
-        if st.button("💾 Lưu vào trí nhớ AI", type="primary"):
-            df_new = df_memory.copy()
+        if st.button("💾 Lưu trí nhớ", type="primary"):
+            df_mem = all_sheets.get("11_TRI_NHO_AI", pd.DataFrame())
+            df_new = df_mem.copy()
             for _, row in df_edit.iterrows():
-                # Map columns an toàn
-                new_row = {col: row[col] for col in df_new.columns if col in row}
-                df_new.loc[len(df_new)] = new_row
+                new_row = {}
+                # Chỉ lấy các cột khớp với sheet để tránh lỗi
+                for col in df_new.columns:
+                    if col in row:
+                        new_row[col] = row[col]
+                    else:
+                        new_row[col] = ""
+                
+                df_new = pd.concat([df_new, pd.DataFrame([new_row])], ignore_index=True)
 
             save_raw_sheet("11_TRI_NHO_AI", df_new)
-            st.success("✅ Đã lưu trí nhớ AI!")
+            st.success("Đã lưu!")
 
     st.markdown("---")
-    st.subheader("📚 Trí nhớ AI đã lưu")
-    if not df_memory.empty:
-        if "LOAI" in df_memory.columns:
-            loai_list = ["Tất cả"] + sorted(df_memory["LOAI"].dropna().unique().tolist())
-            loai_chon = st.selectbox("Lọc theo loại:", loai_list)
+    try:
+        df_mem = all_sheets.get("11_TRI_NHO_AI", pd.DataFrame())
+        if not df_mem.empty and "LOAI" in df_mem.columns:
+            loai_chon = st.selectbox("Lọc theo loại:", ["Tất cả"] + list(df_mem["LOAI"].unique()))
             if loai_chon != "Tất cả":
-                df_memory = df_memory[df_memory["LOAI"] == loai_chon]
-        st.dataframe(df_memory, use_container_width=True)
+                df_mem = df_mem[df_mem["LOAI"] == loai_chon]
+            st.dataframe(df_mem, use_container_width=True)
+    except: pass
