@@ -1,86 +1,68 @@
 import streamlit as st
+from config import REQUIRED_SHEETS
 
-# Import các tab
+# --- IMPORT CÁC MODULE CON ---
+from gsheet import load_all_sheets # Import hàm check kết nối để hiển thị trạng thái
 from data_manager import render_data_manager_tab
-from new_task import render_new_task_tab
-from report import render_report_tab
-from chat import render_chat_tab
-from gemini_chat import render_gemini_chat_tab
-from gemini_task_tab import render_gemini_task_tab
-from gemini_json_import import render_json_import_tab
-from memory_tab import render_memory_tab
-from guide import render_guide_tab # <--- MỚI THÊM
+from guide import render_guide_tab # <--- ĐÃ THÊM FILE HƯỚNG DẪN
 
 # =========================================================
-# ✅ CẤU HÌNH GIAO DIỆN
+# 1. CẤU HÌNH GIAO DIỆN
 # =========================================================
 st.set_page_config(
-    page_title="QLCV Ban KHCNĐMST",
+    page_title="Hệ thống Quản lý EVNGENCO1",
     layout="wide",
-    initial_sidebar_state="expanded"
+    page_icon="🏢"
 )
 
 # =========================================================
-# ✅ HEADER (CHỮ NHỎ ĐI 20%)
+# 2. MENU CHÍNH (SIDEBAR)
 # =========================================================
-# Sử dụng HTML để chỉnh cỡ chữ chính xác
-st.markdown(
-    """
-    <h3 style='text-align: center; color: #1E88E5;'>
-        HỆ THỐNG QUẢN LÝ CÔNG VIỆC BAN KHCNĐMST + TRỢ LÝ GEMINI
-    </h3>
-    """, 
-    unsafe_allow_html=True
-)
+st.markdown("<h3 style='text-align: center; color: #0052cc;'>CỔNG THÔNG TIN BAN KHCNĐMST</h3>", unsafe_allow_html=True)
+
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/906/906343.png", width=100)
+    st.title("Menu Chức năng")
+    
+    # Danh sách các chức năng
+    menu = st.radio(
+        "Chọn tác vụ:",
+        [
+            "🏠 Trang chủ",
+            "📖 Hướng dẫn sử dụng", # <--- Đã thêm vào Menu
+            "📂 Quản lý dữ liệu gốc",
+            # "📝 Giao việc thủ công", 
+            # "🤖 Giao việc bằng Gemini",
+        ]
+    )
+    
+    st.markdown("---")
+    st.caption("Phiên bản: Modular 2.1")
 
 # =========================================================
-# ✅ MENU CHÍNH
+# 3. ĐIỀU HƯỚNG NỘI DUNG
 # =========================================================
-menu = st.sidebar.radio(
-    "📌 CHỨC NĂNG",
-    [
-        "Hướng dẫn sử dụng", # <--- Đưa lên đầu hoặc để cuối tùy bạn
-        "Giao việc bằng Gemini",
-        "Giao việc thủ công",
-        "Báo cáo công việc",
-        "Trao đổi công việc",
-        "Hỏi – đáp Gemini",
-        "Trí nhớ AI",
-        "Quản lý dữ liệu gốc",
-        "Nhập liệu từ JSON",
-    ]
-)
 
-# =========================================================
-# ✅ ĐIỀU HƯỚNG TAB
-# =========================================================
-if menu == "Hướng dẫn sử dụng":
+if menu == "🏠 Trang chủ":
+    st.info("👋 Chào mừng quay trở lại!")
+    st.write("Hệ thống quản lý công việc tập trung - Tích hợp Trí tuệ nhân tạo Gemini.")
+    
+    # Kiểm tra nhanh kết nối
+    if st.button("Kiểm tra kết nối dữ liệu"):
+        try:
+            data = load_all_sheets()
+            st.success(f"✅ Kết nối thành công! Đã tải {len(data)} bảng dữ liệu.")
+        except Exception as e:
+            st.error(f"❌ Kết nối thất bại: {e}")
+
+elif menu == "📖 Hướng dẫn sử dụng":
+    # Gọi hàm từ file guide.py
     render_guide_tab()
 
-elif menu == "Quản lý dữ liệu gốc":
+elif menu == "📂 Quản lý dữ liệu gốc":
+    # Gọi hàm từ file data_manager.py
     render_data_manager_tab()
 
-elif menu == "Giao việc thủ công":
-    render_new_task_tab()
-
-elif menu == "Báo cáo công việc":
-    render_report_tab()
-
-elif menu == "Trao đổi công việc":
-    render_chat_tab()
-
-elif menu == "Hỏi – đáp Gemini":
-    render_gemini_chat_tab()
-
-elif menu == "Giao việc bằng Gemini":
-    render_gemini_task_tab()
-
-elif menu == "Nhập liệu từ JSON":
-    render_json_import_tab()
-
-elif menu == "Trí nhớ AI":
-    render_memory_tab()
-
-# Thêm Footer nhỏ
-st.sidebar.markdown("---")
-st.sidebar.caption("Phiên bản: Cloud 1.2 | Dev: ThangNT")
+# Các menu chờ phát triển tiếp:
+# elif menu == "📝 Giao việc thủ công":
+#     render_new_task_tab()
