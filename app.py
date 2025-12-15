@@ -1,263 +1,86 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime
-import time
-import unicodedata
-from streamlit_gsheets import GSheetsConnection
 
-# =====================================================
-# CẤU HÌNH TRANG
-# =====================================================
+# Import các tab
+from data_manager import render_data_manager_tab
+from new_task import render_new_task_tab
+from report import render_report_tab
+from chat import render_chat_tab
+from gemini_chat import render_gemini_chat_tab
+from gemini_task_tab import render_gemini_task_tab
+from gemini_json_import import render_json_import_tab
+from memory_tab import render_memory_tab
+from guide import render_guide_tab # <--- MỚI THÊM
+
+# =========================================================
+# ✅ CẤU HÌNH GIAO DIỆN
+# =========================================================
 st.set_page_config(
-    page_title="Quản lý công việc nội bộ EVNGENCO1",
+    page_title="QLCV Ban KHCNĐMST",
     layout="wide",
-    page_icon="🏢"
+    initial_sidebar_state="expanded"
 )
 
-# =====================================================
-# KHÓA TRUY CẬP CỨNG – GIỮ LINK NHƯNG PRIVATE BẰNG CODE
-# =====================================================
-ALLOWED_DOMAINS = ["@evngenco1.vn"]
+# =========================================================
+# ✅ HEADER (CHỮ NHỎ ĐI 20%)
+# =========================================================
+# Sử dụng HTML để chỉnh cỡ chữ chính xác
+st.markdown(
+    """
+    <h3 style='text-align: center; color: #1E88E5;'>
+        HỆ THỐNG QUẢN LÝ CÔNG VIỆC BAN KHCNĐMST + TRỢ LÝ GEMINI
+    </h3>
+    """, 
+    unsafe_allow_html=True
+)
 
-if "email_checked" not in st.session_state:
-    st.session_state.email_checked = False
+# =========================================================
+# ✅ MENU CHÍNH
+# =========================================================
+menu = st.sidebar.radio(
+    "📌 CHỨC NĂNG",
+    [
+        "Hướng dẫn sử dụng", # <--- Đưa lên đầu hoặc để cuối tùy bạn
+        "Giao việc bằng Gemini",
+        "Giao việc thủ công",
+        "Báo cáo công việc",
+        "Trao đổi công việc",
+        "Hỏi – đáp Gemini",
+        "Trí nhớ AI",
+        "Quản lý dữ liệu gốc",
+        "Nhập liệu từ JSON",
+    ]
+)
 
-if not st.session_state.email_checked:
-    st.markdown("## 🔒 HỆ THỐNG NỘI BỘ EVNGENCO1")
-    email = st.text_input("Nhập email nội bộ để tiếp tục")
+# =========================================================
+# ✅ ĐIỀU HƯỚNG TAB
+# =========================================================
+if menu == "Hướng dẫn sử dụng":
+    render_guide_tab()
 
-    if st.button("Xác nhận"):
-        email = str(email).strip().lower()
-        if any(email.endswith(d) for d in ALLOWED_DOMAINS):
-            st.session_state.email_checked = True
-            st.session_state.precheck_email = email
-            st.rerun()
-        else:
-            st.error("❌ Truy cập bị từ chối. Chỉ cho phép email EVNGENCO1.")
-            st.stop()
+elif menu == "Quản lý dữ liệu gốc":
+    render_data_manager_tab()
 
-    st.stop()
+elif menu == "Giao việc thủ công":
+    render_new_task_tab()
 
-# =====================================================
-# GOOGLE SHEET CONNECT
-# =====================================================
-def get_data_from_google_sheet(sheet_name):
-    try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
-        return conn.read(worksheet=sheet_name, ttl=0)
-    except Exception:
-        return pd.DataFrame()
+elif menu == "Báo cáo công việc":
+    render_report_tab()
 
-def save_df_to_google_sheet(sheet_name, df):
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    conn.update(worksheet=sheet_name, data=df)
+elif menu == "Trao đổi công việc":
+    render_chat_tab()
 
-def append_chat_to_sheet(user, message):
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    new_row = pd.DataFrame([{
-        "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "User": user,
-        "Message": message
-    }])
-    conn.append(worksheet="10_TRAO_DOI", data=new_row)
+elif menu == "Hỏi – đáp Gemini":
+    render_gemini_chat_tab()
 
-# =====================================================
-# SESSION STATE
-# =====================================================
-for k, v in {
-    "logged_in": False,
-    "current_user": "",
-    "user_role": "",
-}.items():
-    st.session_state.setdefault(k, v)
+elif menu == "Giao việc bằng Gemini":
+    render_gemini_task_tab()
 
-# =====================================================
-# HÀM HỖ TRỢ
-# =====================================================
-def normalize_text(s):
-    s = str(s).strip().upper()
-    s = unicodedata.normalize("NFD", s)
-    return "".join(c for c in s if unicodedata.category(c) != "Mn")
+elif menu == "Nhập liệu từ JSON":
+    render_json_import_tab()
 
-# =====================================================
-# LOGIN LOGIC
-# =====================================================
-def login_logic(username, password):
-    df_users = get_data_from_google_sheet("1_NHAN_SU")
+elif menu == "Trí nhớ AI":
+    render_memory_tab()
 
-    if df_users.empty:
-        st.error("⚠️ Không đọc được Sheet 1_NHAN_SU")
-        return
-
-    df_users.columns = df_users.columns.str.strip().str.upper()
-
-    if "GMAIL" not in df_users.columns:
-        st.error("❌ Thiếu cột GMAIL")
-        return
-
-    pass_col = "PASSWORD" if "PASSWORD" in df_users.columns else "MAT_KHAU"
-    if pass_col not in df_users.columns:
-        st.error("❌ Thiếu cột mật khẩu")
-        return
-
-    df_users["GMAIL_CLEAN"] = df_users["GMAIL"].astype(str).str.strip().str.lower()
-
-    input_email = username.strip().lower()
-    input_pass = password.strip()
-
-    # 🔒 KHÓA THEO DANH SÁCH NỘI BỘ
-    if input_email not in df_users["GMAIL_CLEAN"].values:
-        st.error("❌ Tài khoản không nằm trong danh sách nội bộ EVNGENCO1")
-        return
-
-    user_row = df_users[df_users["GMAIL_CLEAN"] == input_email]
-
-    if user_row.empty:
-        st.error("❌ Email không tồn tại")
-        return
-
-    stored_pass = str(user_row.iloc[0][pass_col]).strip()
-    if stored_pass != input_pass:
-        st.error("❌ Sai mật khẩu")
-        return
-
-    # LOGIN OK
-    st.session_state.logged_in = True
-    st.session_state.current_user = (
-        user_row.iloc[0]["HO_TEN"]
-        if "HO_TEN" in df_users.columns else input_email
-    )
-
-    raw_role = normalize_text(user_row.iloc[0].get("VAI_TRO", "NHAN_VIEN"))
-    admin_alias = {"ADMIN", "QUAN TRI", "QTV", "MANAGER", "SEP"}
-
-    st.session_state.user_role = "ADMIN" if raw_role in admin_alias else "NHAN_VIEN"
-
-    st.success(f"✅ Đăng nhập thành công ({st.session_state.user_role})")
-    time.sleep(0.3)
-    st.rerun()
-
-def logout():
-    for k in ["logged_in", "current_user", "user_role", "email_checked"]:
-        st.session_state[k] = False if k != "current_user" else ""
-    st.rerun()
-
-# =====================================================
-# LOGIN UI
-# =====================================================
-if not st.session_state.logged_in:
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("## 🔐 Đăng nhập hệ thống")
-        username = st.text_input(
-            "Email nội bộ",
-            value=st.session_state.get("precheck_email", "")
-        )
-        password = st.text_input("Mật khẩu", type="password")
-
-        if st.button("Đăng nhập", use_container_width=True):
-            login_logic(username, password)
-
-    st.stop()
-
-# =====================================================
-# SIDEBAR
-# =====================================================
-with st.sidebar:
-    st.write(f"👤 **{st.session_state.current_user}**")
-    if st.session_state.user_role == "ADMIN":
-        st.success("🛡️ ADMIN")
-    else:
-        st.info("🛡️ NHÂN VIÊN")
-
-    if st.button("Đăng xuất"):
-        logout()
-
-# =====================================================
-# HÀM DÙNG CHUNG – RENDER TABLE CHUẨN HỆ THỐNG (CÁCH B)
-# =====================================================
-def render_table(
-    sheet_name: str,
-    editor_key: str,
-    title: str = "",
-    hide_cols: list | None = None
-):
-    if title:
-        st.subheader(title)
-
-    df = get_data_from_google_sheet(sheet_name)
-
-    if df.empty:
-        st.info("Chưa có dữ liệu hoặc không đọc được Sheet.")
-        return
-
-    if hide_cols:
-        df_display = df.drop(columns=[c for c in hide_cols if c in df.columns], errors="ignore")
-    else:
-        df_display = df.copy()
-
-    if st.session_state.user_role == "ADMIN":
-        edited_df = st.data_editor(
-            df_display,
-            num_rows="dynamic",          # 🔥 BẮT BUỘC
-            use_container_width=True,
-            key=editor_key
-        )
-
-        if st.button(f"💾 Lưu {sheet_name}", key=f"save_{editor_key}"):
-            save_df_to_google_sheet(sheet_name, edited_df)
-            st.success("Đã lưu về Google Sheet.")
-            st.rerun()
-    else:
-        st.dataframe(df_display, use_container_width=True)
-
-# =====================================================
-# MAIN UI
-# =====================================================
-st.title("📂 Quản lý công việc nội bộ")
-
-tabs_name = ["📋 Công việc", "💬 Trao đổi"]
-if st.session_state.user_role == "ADMIN":
-    tabs_name.append("⚙️ Quản trị")
-
-tabs = st.tabs(tabs_name)
-
-# =====================================================
-# TAB 1 – CÔNG VIỆC
-# =====================================================
-with tabs[0]:
-    render_table(
-        sheet_name="7_CONG_VIEC",
-        editor_key="edit_cong_viec",
-        title="📋 Danh sách công việc"
-    )
-
-# =====================================================
-# TAB 2 – TRAO ĐỔI
-# =====================================================
-with tabs[1]:
-    st.subheader("💬 Trao đổi nội bộ")
-
-    df_chat = get_data_from_google_sheet("10_TRAO_DOI")
-    if df_chat.empty:
-        df_chat = pd.DataFrame(columns=["Time", "User", "Message"])
-
-    for _, r in df_chat.iterrows():
-        role = "user" if r["User"] == st.session_state.current_user else "assistant"
-        st.chat_message(role).write(f"**{r['User']}**: {r['Message']}")
-
-    if msg := st.chat_input("Nhập nội dung trao đổi"):
-        append_chat_to_sheet(st.session_state.current_user, msg)
-        st.rerun()
-
-# =====================================================
-# TAB 3 – QUẢN TRỊ (ADMIN)
-# =====================================================
-if st.session_state.user_role == "ADMIN":
-    with tabs[2]:
-        render_table(
-            sheet_name="1_NHAN_SU",
-            editor_key="edit_nhan_su",
-            title="⚙️ Quản lý nhân sự",
-            hide_cols=["PASSWORD", "MAT_KHAU", "PASSWORD_HASH"]
-        )
+# Thêm Footer nhỏ
+st.sidebar.markdown("---")
+st.sidebar.caption("Phiên bản: Cloud 1.2 | Dev: ThangNT")
