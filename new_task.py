@@ -1,5 +1,5 @@
 # =========================================================
-# NEW_TASK.PY — TAB GIAO VIỆC MỚI (22 CỘT + MÔ TẢ)
+# NEW_TASK.PY — TAB GIAO VIỆC MỚI (BẢN NÂNG CẤP)
 # =========================================================
 
 import streamlit as st
@@ -8,9 +8,9 @@ from datetime import datetime, timedelta
 from utils import (
     get_display_list_multi,
     lookup_display,
-    get_unique_list   # ✅ thêm dòng này
+    get_unique_list,
+    format_date_vn
 )
-
 from gsheet import connect_gsheet
 import pandas as pd
 
@@ -86,11 +86,11 @@ def append_new_work(new_data: dict, df_cv: pd.DataFrame, all_sheets: dict):
         # ---------------------------------------------------------
         # THÊM CÁC CỘT MÔ TẢ TỰ ĐỘNG
         # ---------------------------------------------------------
-        new_row_dict["TEN_NGUOI_NHAN_MO_TA"] = lookup_display(
+        new_row_dict["NGUOI_NHAN_MO_TA"] = lookup_display(
             new_row_dict["NGUOI_NHAN"], df_ns, "ID_NHAN_SU",
             ["HO_TEN", "CHUC_VU", "DIEN_THOAI"]
         )
-        new_row_dict["TEN_NGUOI_GIAO_MO_TA"] = lookup_display(
+        new_row_dict["NGUOI_GIAO_MO_TA"] = lookup_display(
             new_row_dict["NGUOI_GIAO"], df_ns, "ID_NHAN_SU",
             ["HO_TEN", "CHUC_VU", "DIEN_THOAI"]
         )
@@ -130,10 +130,10 @@ def append_new_work(new_data: dict, df_cv: pd.DataFrame, all_sheets: dict):
 
 
 # ---------------------------------------------------------
-# TAB GIAO VIỆC MỚI
+# TAB GIAO VIỆC MỚI (BẢN NÂNG CẤP)
 # ---------------------------------------------------------
 def render_new_task_tab(all_sheets, df_cv, df_ns, df_dv):
-    st.header("📝 Giao Công Việc Mới (Sheet 7_CONG_VIEC)")
+    st.header("📝 Giao Công Việc Mới (Bản nâng cấp)")
 
     df_da = all_sheets["4_DU_AN"]
     df_gt = all_sheets["5_GOI_THAU"]
