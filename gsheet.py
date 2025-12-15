@@ -1,115 +1,89 @@
 import streamlit as st
 import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from utils import normalize_columns, remove_duplicate_and_empty_cols, parse_dates
+from streamlit_gsheets import GSheetsConnection
+from config import REQUIRED_SHEETS
 
 # =========================================================
-# 🔌 KẾT NỐI GOOGLE SHEET
+# 🔌 KẾT NỐI (Dùng thư viện chuẩn Streamlit)
 # =========================================================
-def connect_gsheet():
-    """Kết nối và trả về client gspread"""
-    # Lấy thông tin từ secrets.toml
-    secrets = st.secrets["gdrive"]
+def get_conn():
+    """Tạo kết nối tới Google Sheet dùng st.connection"""
+    return st.connection("gsheets", type=GSheetsConnection)
+
+# =========================================================
+# 🛠️ CÁC HÀM HỖ TRỢ (Thay thế utils.py)
+# =========================================================
+def clean_dataframe(df):
+    """Làm sạch DataFrame: Xóa cột trống, chuẩn hóa ngày"""
+    if df.empty: return df
     
-    # Tạo scope (quyền truy cập)
-    scope = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
+    # 1. Chuẩn hóa tên cột (Viết hoa, xóa khoảng trắng)
+    df.columns = df.columns.str.strip().str.upper()
     
-    # Tạo credentials từ thông tin trong secrets
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(secrets, scope)
-    client = gspread.authorize(creds)
-    return client
+    # 2. Xóa các cột không có tên (Cột trống trong Excel)
+    df = df.loc[:, ~df.columns.str.contains('^UNNAMED', case=False)]
+    
+    # 3. Ép kiểu datetime cho các cột ngày tháng (dựa trên tên cột)
+    for col in df.columns:
+        # Nếu tên cột có chứa chữ NGAY, THOI_GIAN, HAN_CHOT...
+        if any(x in col for x in ["NGAY", "TIME", "HAN", "DATE"]):
+            try:
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+            except:
+                pass
+    return df
 
 # =========================================================
 # 📥 TẢI DỮ LIỆU (Load All Sheets)
 # =========================================================
-@st.cache_data(show_spinner=False, ttl=60) # Tự làm mới sau 60s
-def load_all_sheets() -> dict:
+def load_all_sheets():
     """
-    Đọc toàn bộ các sheet trong file Google Sheet.
-    Trả về: Dictionary {'TEN_SHEET': DataFrame, ...}
+    Đọc toàn bộ các sheet được khai báo trong config.py
     """
-    try:
-        client = connect_gsheet()
-        spreadsheet_id = st.secrets["gdrive"]["spreadsheet_id"]
-        sh = client.open_by_key(spreadsheet_id)
-        
-        all_data = {}
-        worksheets = sh.worksheets()
-        
-        for ws in worksheets:
-            sheet_name = ws.title
+    conn = get_conn()
+    all_data = {}
+    
+    # Duyệt qua danh sách sheet cần thiết trong Config
+    for sheet_name in REQUIRED_SHEETS:
+        try:
+            # ttl=0: Luôn lấy dữ liệu mới nhất
+            df = conn.read(worksheet=sheet_name, ttl=0)
             
-            # 1. Lấy toàn bộ dữ liệu thô (List of Lists)
-            # Cách này an toàn hơn dùng pd.read_csv
-            raw_data = ws.get_all_values()
+            # Nếu đọc về là None hoặc rỗng
+            if df is None: df = pd.DataFrame()
             
-            if not raw_data:
-                # Nếu sheet trắng tinh, tạo DataFrame rỗng
-                all_data[sheet_name] = pd.DataFrame()
-                continue
-                
-            # 2. Tách Tiêu đề (Dòng 1) và Dữ liệu (Dòng 2 trở đi)
-            headers = raw_data[0] # Luôn lấy dòng đầu làm tiêu đề
-            rows = raw_data[1:] if len(raw_data) > 1 else []
-            
-            # 3. Tạo DataFrame
-            df = pd.DataFrame(rows, columns=headers)
-            
-            # 4. Làm sạch dữ liệu (Dùng các hàm từ utils.py)
-            # - Chuẩn hóa tên cột (Viết hoa, bỏ dấu cách thừa)
-            # df = normalize_columns(df) -> Tạm tắt để tôn trọng tên cột gốc của bạn
-            
-            # - Xóa cột trống vô nghĩa
-            df = remove_duplicate_and_empty_cols(df)
-            
-            # - Xử lý ngày tháng (để tránh lỗi NaT/ValueError)
-            df = parse_dates(df)
+            # Làm sạch dữ liệu
+            df = clean_dataframe(df)
             
             all_data[sheet_name] = df
             
-        return all_data
-
-    except Exception as e:
-        # Nếu lỗi, in ra console để debug nhưng không làm sập app
-        print(f"❌ Lỗi tải dữ liệu: {e}")
-        st.error(f"Không thể tải dữ liệu từ Google Sheet. Lỗi: {e}")
-        return {}
+        except Exception as e:
+            # Nếu Sheet chưa có trong file, tạo bảng rỗng
+            all_data[sheet_name] = pd.DataFrame()
+            
+    return all_data
 
 # =========================================================
 # 💾 LƯU DỮ LIỆU (Save Raw Sheet)
 # =========================================================
 def save_raw_sheet(sheet_name, df_new):
     """
-    Ghi đè DataFrame mới vào Google Sheet.
+    Ghi đè dữ liệu vào Sheet
     """
+    conn = get_conn()
     try:
-        client = connect_gsheet()
-        spreadsheet_id = st.secrets["gdrive"]["spreadsheet_id"]
-        sh = client.open_by_key(spreadsheet_id)
-        ws = sh.worksheet(sheet_name)
-        
-        # 1. Xử lý dữ liệu trước khi lưu
-        # Chuyển đổi datetime thành string để Google Sheet không bị lỗi format
+        # Chuẩn bị dữ liệu trước khi lưu (tránh lỗi JSON)
         df_save = df_new.copy()
+        
+        # Chuyển datetime về string để lưu lên Sheet không bị lỗi
         for col in df_save.columns:
-            # Nếu là ngày tháng, chuyển thành chuỗi yyyy-mm-dd
             if pd.api.types.is_datetime64_any_dtype(df_save[col]):
                 df_save[col] = df_save[col].dt.strftime('%Y-%m-%d').fillna("")
-            # Thay thế NaN/None bằng chuỗi rỗng
-            df_save[col] = df_save[col].fillna("")
-            
-        # 2. Cập nhật dữ liệu
-        # clear() xóa cũ, update() ghi mới
-        ws.clear()
         
-        # Chuẩn bị list of lists: [ [Header], [Row1], [Row2]... ]
-        data_to_write = [df_save.columns.tolist()] + df_save.values.tolist()
-        ws.update(data_to_write)
-        
+        # Hàm update của st-gsheets tự động clear và ghi đè
+        conn.update(worksheet=sheet_name, data=df_save)
         return True
+        
     except Exception as e:
+        st.error(f"Lỗi khi lưu '{sheet_name}': {e}")
         raise e
