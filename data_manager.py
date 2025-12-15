@@ -5,74 +5,53 @@ from gsheet import load_all_sheets, save_raw_sheet
 def render_data_manager_tab():
     st.header("📂 Quản lý dữ liệu gốc")
 
-    # ===============================
-    # 1. KIỂM TRA QUYỀN
-    # ===============================
-    if st.session_state.get("user_role") != "ADMIN":
-        st.warning("🔒 Chỉ quản trị viên mới được chỉnh sửa dữ liệu gốc.")
-        st.stop()
-
-    # ===============================
-    # 2. TẢI DỮ LIỆU
-    # ===============================
+    # 1. Tải dữ liệu
     try:
         all_sheets = load_all_sheets()
     except Exception as e:
-        st.error(f"Lỗi kết nối Google Sheet: {e}")
+        st.error(f"Lỗi kết nối: {e}")
         return
 
     if not all_sheets:
         st.warning("Không đọc được dữ liệu nào từ file Sheet.")
         return
 
-    # ===============================
-    # 3. CHỌN SHEET
-    # ===============================
+    # 2. Chọn Sheet
     sheet_names = list(all_sheets.keys())
-
-    index_default = sheet_names.index("4_DU_AN") if "4_DU_AN" in sheet_names else 0
-
-    selected_sheet = st.selectbox(
-        "📑 Chọn bảng dữ liệu:",
-        sheet_names,
-        index=index_default,
-        key="select_data_manager_sheet"
-    )
-
-    # ===============================
-    # 4. LẤY DỮ LIỆU
-    # ===============================
+    # Ưu tiên chọn tab đang bị lỗi để kiểm tra
+    index_default = 0
+    if "4_DU_AN" in sheet_names:
+        index_default = sheet_names.index("4_DU_AN")
+        
+    selected_sheet = st.selectbox("Chọn bảng dữ liệu:", sheet_names, index=index_default)
+    
+    # 3. Lấy dữ liệu
     df = all_sheets.get(selected_sheet, pd.DataFrame())
 
-    st.markdown(f"### ✏️ Đang chỉnh sửa: `{selected_sheet}`")
-
+    st.markdown(f"### Đang chỉnh sửa: `{selected_sheet}`")
+    
+    # 4. Hiển thị Data Editor
+    # Nếu thực sự trống (0 dòng, 0 cột), tạo khung tạm
     if df.empty and len(df.columns) == 0:
-        st.warning("⚠️ Bảng chưa có tiêu đề cột. Tạo khung tạm.")
+        st.warning("⚠️ Bảng này chưa có tiêu đề cột.")
         df = pd.DataFrame(columns=["Cột A", "Cột B", "Cột C"])
-
-    # ❗ KHÔNG astype(str)
-    df_edit = df.copy()
-
-    # ===============================
-    # 5. DATA EDITOR (ADMIN)
-    # ===============================
+    
+    # Ép kiểu sang string để hiển thị an toàn (tránh lỗi ngày tháng hiển thị)
+    df_display = df.astype(str)
+    
     edited_df = st.data_editor(
-        df_edit,
-        num_rows="dynamic",          # 🔥 BẮT BUỘC
+        df_display,
+        num_rows="dynamic",
         use_container_width=True,
-        key=f"editor_{selected_sheet}"
+        key=f"editor_{selected_sheet}" 
     )
 
-    # ===============================
-    # 6. NÚT LƯU
-    # ===============================
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        if st.button("💾 Lưu thay đổi", type="primary"):
-            try:
-                save_raw_sheet(selected_sheet, edited_df)
-                st.success("✅ Đã lưu thành công!")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Lỗi khi lưu: {e}")
+    # 5. Nút Lưu
+    if st.button("💾 Lưu thay đổi", type="primary"):
+        try:
+            save_raw_sheet(selected_sheet, edited_df)
+            st.success("✅ Đã lưu thành công!")
+            st.cache_data.clear()
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ Lỗi khi lưu: {e}")
