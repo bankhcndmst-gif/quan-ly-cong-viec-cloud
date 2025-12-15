@@ -66,6 +66,10 @@ def format_date_vn(date_obj):
     if pd.isnull(date_obj):
         return ""
     try:
+        # Nếu là datetime object
+        if hasattr(date_obj, "strftime"):
+            return date_obj.strftime("%d/%m/%Y")
+            
         # Nếu là chuỗi
         if isinstance(date_obj, str):
             if not date_obj.strip(): return ""
@@ -74,52 +78,22 @@ def format_date_vn(date_obj):
                 return temp.strftime("%d/%m/%Y")
             return date_obj
             
-        # Nếu là datetime object
-        if hasattr(date_obj, "strftime"):
-            return date_obj.strftime("%d/%m/%Y")
-            
         return str(date_obj)
     except:
         return ""
 
-def get_unique_list(df, col_name):
-    """Lấy danh sách giá trị duy nhất (để làm filter)."""
-    if df.empty or col_name not in df.columns:
-        return []
-    return df[col_name].dropna().unique().tolist()
-
-def lookup_display(id_val, ref_df, id_col, display_cols):
-    """Tìm ID và trả về Tên hiển thị."""
-    if pd.isnull(id_val) or str(id_val).strip() == "":
-        return ""
-        
-    if ref_df.empty or id_col not in ref_df.columns:
-        return str(id_val)
-        
-    # Chuyển về string để so sánh
-    row = ref_df[ref_df[id_col].astype(str) == str(id_val)]
-    
-    if row.empty:
-        return str(id_val)
-    
-    displays = []
-    for col in display_cols:
-        if col in row.columns:
-            val = row.iloc[0][col]
-            if pd.notnull(val) and str(val).strip():
-                 displays.append(str(val))
-    
-    return " - ".join(displays) if displays else str(id_val)
-
 def get_display_list_multi(df, id_col, cols, prefix="Chọn..."):
     """
-    Tạo danh sách hiển thị cho Dropdown.
+    Tạo danh sách hiển thị cho Dropdown: 'ID | Tên - Mô tả' và map ID ngược lại.
     """
-    if df.empty:
+    if df.empty or id_col not in df.columns:
         return [prefix], {}
 
     display_list = [prefix]
-    mapping = {}
+    mapping = {prefix: ""}
+
+    # Lấy các cột hiển thị an toàn
+    valid_cols = [c for c in cols if c in df.columns]
 
     for _, row in df.iterrows():
         id_val = row.get(id_col, "")
@@ -127,16 +101,15 @@ def get_display_list_multi(df, id_col, cols, prefix="Chọn..."):
             continue
             
         parts = []
-        for col in cols:
-            if col in df.columns:
-                val = row[col]
-                
-                # Format ngày tháng an toàn
-                if pd.api.types.is_datetime64_any_dtype(df[col]) or isinstance(val, (pd.Timestamp, datetime)):
-                    val = format_date_vn(val)
-                
-                if pd.notnull(val) and str(val).strip() != "":
-                    parts.append(str(val))
+        for col in valid_cols:
+            val = row[col]
+            
+            # Format ngày tháng an toàn
+            if isinstance(val, (pd.Timestamp, datetime)):
+                val = format_date_vn(val)
+            
+            if pd.notnull(val) and str(val).strip() != "":
+                parts.append(str(val))
         
         display_text = " - ".join(parts) if parts else str(id_val)
         
