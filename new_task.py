@@ -2,18 +2,22 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from gsheet import load_all_sheets, save_raw_sheet
-from utils import get_display_list_multi, format_date_vn
+from config import LINK_CONFIG_RAW # Dùng để load các ID liên quan
+
+# =========================================================
+# 🛠️ HÀM HỖ TRỢ (Đã Gộp vào đây thay vì file utils.py)
+# =========================================================
 
 def generate_task_id(df):
     """Tự động sinh ID mới: CV001 -> CV002"""
     if df.empty or "ID_CONG_VIEC" not in df.columns:
         return "CV001"
-    
-    # Lấy danh sách ID cũ
+        
     ids = df["ID_CONG_VIEC"].dropna().astype(str).tolist()
     max_num = 0
+    
     for i in ids:
-        # Lọc lấy số từ chuỗi (CV001 -> 1)
+        # Lọc lấy số từ chuỗi (CHỈ LẤY CÁC KÝ TỰ SỐ)
         clean_id = ''.join(filter(str.isdigit, i))
         if clean_id:
             try:
@@ -23,12 +27,42 @@ def generate_task_id(df):
             
     return f"CV{max_num + 1:03d}"
 
+def get_display_list_multi(df, id_col, display_cols, prefix="Chọn..."):
+    """
+    Tạo danh sách string: 'ID | Tên - Mô tả' và map ID ngược lại.
+    Giống với hàm bạn đã dùng trong utils.py
+    """
+    if df.empty or id_col not in df.columns:
+        return [prefix], {prefix: ""}
+
+    # Lấy các cột hiển thị an toàn
+    valid_cols = [col for col in display_cols if col in df.columns]
+    
+    display_list = []
+    id_map = {prefix: ""} # Đảm bảo map có giá trị mặc định
+    
+    for _, row in df.iterrows():
+        # Xây dựng chuỗi hiển thị
+        display_name = " - ".join([str(row[col]) for col in valid_cols if str(row[col]).strip()])
+        full_display = f"{row[id_col]} | {display_name}"
+        
+        display_list.append(full_display)
+        id_map[full_display] = row[id_col]
+        
+    return [prefix] + display_list, id_map
+
+
+# =========================================================
+# ✅ TAB GIAO VIỆC THỦ CÔNG (ĐÃ SỬA LỖI THIẾU FILE)
+# =========================================================
+
 def render_new_task_tab():
     st.header("📝 Giao việc thủ công (Chi tiết)")
 
     # 1. Tải dữ liệu nền
     try:
         all_sheets = load_all_sheets()
+        # Lấy dataframes, load_all_sheets đã chuẩn hóa tên cột thành CHỮ HOA
         df_cv = all_sheets.get("7_CONG_VIEC", pd.DataFrame())
         df_ns = all_sheets.get("1_NHAN_SU", pd.DataFrame())
         df_da = all_sheets.get("4_DU_AN", pd.DataFrame())
@@ -39,10 +73,16 @@ def render_new_task_tab():
         return
 
     # Chuẩn bị danh sách chọn
+    # Lưu ý: Các cột ID và Display_Cols phải là CHỮ HOA để khớp với load_all_sheets()
     list_ns, map_ns = get_display_list_multi(df_ns, "ID_NHAN_SU", ["HO_TEN"], "Chọn nhân sự...")
     list_da, map_da = get_display_list_multi(df_da, "ID_DU_AN", ["TEN_DU_AN"], "Không thuộc dự án")
     list_hd, map_hd = get_display_list_multi(df_hd, "ID_HOP_DONG", ["TEN_HD", "SO_HD"], "Không thuộc hợp đồng")
     list_gt, map_gt = get_display_list_multi(df_gt, "ID_GOI_THAU", ["TEN_GOI_THAU"], "Không thuộc gói thầu")
+    
+    # Lấy ID công việc mới nhất
+    next_id = generate_task_id(df_cv)
+    st.info(f"Mã công việc mới: **{next_id}**")
+
 
     # 2. Tạo Form nhập liệu
     with st.form("form_giao_viec_full"):
@@ -65,13 +105,13 @@ def render_new_task_tab():
             nguoi_nhan_display = st.selectbox("Người chủ trì (Nhận)", list_ns, index=0)
             
             # Chọn nhiều người phối hợp (Multiselect)
-            # Lọc bỏ dòng "Chọn nhân sự..." để list đẹp hơn
-            list_ns_real = [x for x in list_ns if "Chọn" not in x]
+            list_ns_real = [x for x in list_ns if x != "Chọn nhân sự..."] # Lọc bỏ dòng mặc định
             nguoi_phoi_hop_display = st.multiselect("Người phối hợp", list_ns_real)
 
         with col4:
-            ngay_giao = st.date_input("Ngày giao", value=datetime.now())
-            han_chot = st.date_input("Hạn chót", value=None)
+            ngay_giao = st.date_input("Ngày giao", value=datetime.now().date())
+            # Han_chot để None thì Streamlit sẽ hiện "No date set"
+            han_chot = st.date_input("Hạn chót", value=None) 
             trang_thai = st.selectbox("Trạng thái tổng", ["Chưa thực hiện", "Đang thực hiện", "Hoàn thành", "Tạm dừng"])
 
         # --- NHÓM 3: LIÊN KẾT (Dự án/Hợp đồng) ---
@@ -100,8 +140,8 @@ def render_new_task_tab():
 
         if submitted:
             # 1. Validate
-            if not ten_viec.strip():
-                st.error("⚠️ Tên công việc không được để trống!")
+            if not ten_viec.strip() or not nguoi_nhan_display or nguoi_nhan_display == "Chọn nhân sự...":
+                st.error("⚠️ Tên công việc và Người nhận không được để trống!")
                 return
             
             # 2. Map ID từ tên hiển thị
@@ -109,23 +149,21 @@ def render_new_task_tab():
             id_nguoi_nhan = map_ns.get(nguoi_nhan_display, "")
             
             # Xử lý người phối hợp (nối chuỗi các ID lại)
-            ids_phoi_hop = []
-            for name in nguoi_phoi_hop_display:
-                if name in map_ns: ids_phoi_hop.append(map_ns[name])
+            ids_phoi_hop = [map_ns[name] for name in nguoi_phoi_hop_display if name in map_ns]
             str_phoi_hop = ", ".join(ids_phoi_hop)
 
             id_da = map_da.get(da_display, "")
             id_hd = map_hd.get(hd_display, "")
             id_gt = map_gt.get(gt_display, "")
 
-            # 3. Tạo row dữ liệu (ĐÚNG THỨ TỰ CỘT BẠN GỬI)
+            # 3. Tạo row dữ liệu
             new_id = generate_task_id(df_cv)
             
-            # Chuẩn hóa ngày
-            s_ngay_giao = ngay_giao.strftime("%d/%m/%Y") if ngay_giao else ""
-            s_han_chot = han_chot.strftime("%d/%m/%Y") if han_chot else ""
+            # Chuẩn hóa ngày (Streamlit Date -> String 'YYYY-MM-DD' cho Excel)
+            s_ngay_giao = ngay_giao.strftime("%Y-%m-%d") if ngay_giao else ""
+            s_han_chot = han_chot.strftime("%Y-%m-%d") if han_chot else ""
 
-            # Danh sách cột chuẩn (22 cột)
+            # Danh sách cột chuẩn (22 cột - Theo cấu trúc file bạn gửi)
             cols_chuan = [
                 "ID_CONG_VIEC", "TEN_VIEC", "NOI_DUNG", "LOAI_VIEC", "NGUON_GIAO_VIEC",
                 "NGUOI_GIAO", "NGUOI_NHAN", "NGAY_GIAO", "HAN_CHOT", "NGUOI_PHOI_HOP",
@@ -134,11 +172,12 @@ def render_new_task_tab():
                 "VUONG_MAC", "DE_XUAT", "IDDV_CV", "GHI_CHU_CV", "EMAIL_BC_CV"
             ]
             
-            # Đảm bảo DataFrame đủ cột
+            # Đảm bảo DataFrame đủ cột trước khi thêm
             for c in cols_chuan:
                 if c not in df_cv.columns: df_cv[c] = ""
-
-            new_row = {
+                
+            # Tạo dictionary dữ liệu mới (Sắp xếp theo cols_chuan để ghi chính xác)
+            new_row_data = {
                 "ID_CONG_VIEC": new_id,
                 "TEN_VIEC": ten_viec,
                 "NOI_DUNG": noi_dung,
@@ -150,8 +189,8 @@ def render_new_task_tab():
                 "HAN_CHOT": s_han_chot,
                 "NGUOI_PHOI_HOP": str_phoi_hop,
                 "TRANG_THAI_TONG": trang_thai,
-                "TRANG_THAI_CHI_TIET": "", # Mới tạo thì chưa có chi tiết
-                "NGAY_THUC_TE_XONG": "",   # Mới tạo thì chưa xong
+                "TRANG_THAI_CHI_TIET": "",
+                "NGAY_THUC_TE_XONG": "",
                 "IDVB_VAN_BAN": id_van_ban,
                 "IDHD_CV": id_hd,
                 "IDDA_CV": id_da,
@@ -164,8 +203,13 @@ def render_new_task_tab():
             }
             
             # 4. Lưu
-            df_new = pd.concat([df_cv, pd.DataFrame([new_row])], ignore_index=True)
+            # Tạo DataFrame 1 dòng từ dữ liệu mới
+            df_new_row = pd.DataFrame([new_row_data], columns=cols_chuan)
+            
+            df_new = pd.concat([df_cv, df_new_row], ignore_index=True)
+            
             save_raw_sheet("7_CONG_VIEC", df_new)
             
             st.success(f"🎉 Đã lưu công việc mới: **{new_id} - {ten_viec}**")
-            st.cache_data.clear()
+            st.cache_data.clear() # Xóa cache để dữ liệu mới hiện ngay trên các tab khác
+            st.rerun() # Tải lại trang để reset form
