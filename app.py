@@ -60,9 +60,19 @@ menu = st.sidebar.radio(
     ]
 )
 
+# 👇👇👇 DÁN ĐOẠN NÀY VÀO ĐÂY 👇👇👇
+st.sidebar.markdown("---") # Kẻ một đường gạch ngang cho đẹp
+if st.sidebar.button("🔄 Làm mới dữ liệu"):
+    st.cache_data.clear()
+    st.rerun()
+# 👆👆👆 KẾT THÚC ĐOẠN CẦN DÁN 👆👆👆
+
 # =========================================================
 # ✅ ĐIỀU HƯỚNG TAB
 # =========================================================
+if menu == "Hướng dẫn sử dụng":
+    render_guide_tab()
+# ... (các dòng tiếp theo giữ nguyên)
 if menu == "Hướng dẫn sử dụng":
     render_guide_tab()
 
@@ -106,3 +116,4 @@ st.sidebar.markdown(
     """,
     unsafe_allow_html=True
 )
+
