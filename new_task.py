@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from gsheet import load_all_sheets, save_raw_sheet
-from config import LINK_CONFIG_RAW # Dùng để load các ID liên quan
+from config import LINK_CONFIG_RAW 
 
 # =========================================================
-# 🛠️ HÀM HỖ TRỢ (Đã Gộp vào đây thay vì file utils.py)
+# 🛠️ HÀM HỖ TRỢ (Gộp vào đây để không cần utils.py)
 # =========================================================
 
 def generate_task_id(df):
@@ -17,7 +17,6 @@ def generate_task_id(df):
     max_num = 0
     
     for i in ids:
-        # Lọc lấy số từ chuỗi (CHỈ LẤY CÁC KÝ TỰ SỐ)
         clean_id = ''.join(filter(str.isdigit, i))
         if clean_id:
             try:
@@ -27,33 +26,44 @@ def generate_task_id(df):
             
     return f"CV{max_num + 1:03d}"
 
-def get_display_list_multi(df, id_col, display_cols, prefix="Chọn..."):
+def get_display_list_multi(df, id_col, cols, prefix="Chọn..."):
     """
-    Tạo danh sách string: 'ID | Tên - Mô tả' và map ID ngược lại.
-    Giống với hàm bạn đã dùng trong utils.py
+    Tạo danh sách hiển thị cho Dropdown: 'ID | Tên - Mô tả' và map ID ngược lại.
     """
     if df.empty or id_col not in df.columns:
         return [prefix], {prefix: ""}
 
-    # Lấy các cột hiển thị an toàn
-    valid_cols = [col for col in display_cols if col in df.columns]
-    
-    display_list = []
-    id_map = {prefix: ""} # Đảm bảo map có giá trị mặc định
-    
+    display_list = [prefix]
+    mapping = {prefix: ""}
+
+    valid_cols = [c for c in cols if c in df.columns]
+
     for _, row in df.iterrows():
-        # Xây dựng chuỗi hiển thị
-        display_name = " - ".join([str(row[col]) for col in valid_cols if str(row[col]).strip()])
-        full_display = f"{row[id_col]} | {display_name}"
+        id_val = row.get(id_col, "")
+        if pd.isnull(id_val) or str(id_val).strip() == "":
+            continue
+            
+        parts = []
+        for col in valid_cols:
+            val = row[col]
+            
+            # Format ngày tháng an toàn (nếu cần)
+            if isinstance(val, (pd.Timestamp, datetime)):
+                val = val.strftime("%d/%m/%Y")
+            
+            if pd.notnull(val) and str(val).strip() != "":
+                parts.append(str(val))
         
-        display_list.append(full_display)
-        id_map[full_display] = row[id_col]
+        display_text = f"{id_val} | " + " - ".join(parts) if parts else str(id_val)
         
-    return [prefix] + display_list, id_map
+        display_list.append(display_text)
+        mapping[display_text] = id_val
+
+    return display_list, mapping
 
 
 # =========================================================
-# ✅ TAB GIAO VIỆC THỦ CÔNG (ĐÃ SỬA LỖI THIẾU FILE)
+# ✅ TAB GIAO VIỆC THỦ CÔNG
 # =========================================================
 
 def render_new_task_tab():
@@ -62,8 +72,7 @@ def render_new_task_tab():
     # 1. Tải dữ liệu nền
     try:
         all_sheets = load_all_sheets()
-        # Lấy dataframes, load_all_sheets đã chuẩn hóa tên cột thành CHỮ HOA
-        df_cv = all_sheets.get("7_CONG_VIEC", pd.DataFrame())
+        df_cv = all_sheets.get("7_CONG_VIEC", pd.DataFrame()) 
         df_ns = all_sheets.get("1_NHAN_SU", pd.DataFrame())
         df_da = all_sheets.get("4_DU_AN", pd.DataFrame())
         df_gt = all_sheets.get("5_GOI_THAU", pd.DataFrame())
@@ -73,18 +82,17 @@ def render_new_task_tab():
         return
 
     # Chuẩn bị danh sách chọn
-    # Lưu ý: Các cột ID và Display_Cols phải là CHỮ HOA để khớp với load_all_sheets()
     list_ns, map_ns = get_display_list_multi(df_ns, "ID_NHAN_SU", ["HO_TEN"], "Chọn nhân sự...")
     list_da, map_da = get_display_list_multi(df_da, "ID_DU_AN", ["TEN_DU_AN"], "Không thuộc dự án")
     list_hd, map_hd = get_display_list_multi(df_hd, "ID_HOP_DONG", ["TEN_HD", "SO_HD"], "Không thuộc hợp đồng")
     list_gt, map_gt = get_display_list_multi(df_gt, "ID_GOI_THAU", ["TEN_GOI_THAU"], "Không thuộc gói thầu")
-    
+
     # Lấy ID công việc mới nhất
     next_id = generate_task_id(df_cv)
     st.info(f"Mã công việc mới: **{next_id}**")
 
 
-    # 2. Tạo Form nhập liệu
+    # --- 2. Giao diện Form ---
     with st.form("form_giao_viec_full"):
         
         # --- NHÓM 1: THÔNG TIN CƠ BẢN ---
@@ -102,19 +110,17 @@ def render_new_task_tab():
         col3, col4 = st.columns(2)
         with col3:
             nguoi_giao_display = st.selectbox("Người giao", list_ns, index=0)
-            nguoi_nhan_display = st.selectbox("Người chủ trì (Nhận)", list_ns, index=0)
+            nguoi_nhan_display = st.selectbox("Người chủ trì (Nhận) (*)", list_ns, index=0)
             
-            # Chọn nhiều người phối hợp (Multiselect)
-            list_ns_real = [x for x in list_ns if x != "Chọn nhân sự..."] # Lọc bỏ dòng mặc định
+            list_ns_real = [x for x in list_ns if x != "Chọn nhân sự..."] 
             nguoi_phoi_hop_display = st.multiselect("Người phối hợp", list_ns_real)
 
         with col4:
             ngay_giao = st.date_input("Ngày giao", value=datetime.now().date())
-            # Han_chot để None thì Streamlit sẽ hiện "No date set"
             han_chot = st.date_input("Hạn chót", value=None) 
             trang_thai = st.selectbox("Trạng thái tổng", ["Chưa thực hiện", "Đang thực hiện", "Hoàn thành", "Tạm dừng"])
 
-        # --- NHÓM 3: LIÊN KẾT (Dự án/Hợp đồng) ---
+        # --- NHÓM 3: LIÊN KẾT ---
         st.subheader("3. Liên kết hồ sơ")
         col5, col6, col7 = st.columns(3)
         with col5:
@@ -124,11 +130,10 @@ def render_new_task_tab():
         with col7:
             gt_display = st.selectbox("Gói thầu", list_gt)
             
-        # Các ID phụ khác (nhập text tạm thời)
-        with st.expander("➕ Thông tin bổ sung (Văn bản, Đơn vị, Vướng mắc...)"):
+        with st.expander("➕ Thông tin bổ sung"):
             c_a, c_b = st.columns(2)
-            id_van_ban = c_a.text_input("ID Văn bản liên quan (IDVB_VAN_BAN)")
-            id_don_vi = c_b.text_input("ID Đơn vị phối hợp (IDDV_CV)")
+            id_van_ban = c_a.text_input("ID Văn bản liên quan")
+            id_don_vi = c_b.text_input("ID Đơn vị phối hợp")
             
             vuong_mac = st.text_area("Vướng mắc (nếu có)")
             de_xuat = st.text_area("Đề xuất (nếu có)")
@@ -136,19 +141,18 @@ def render_new_task_tab():
             email_bc = st.text_input("Email báo cáo (EMAIL_BC_CV)")
 
         # --- Nút Gửi ---
-        submitted = st.form_submit_button("✅ Lưu công việc", type="primary")
+        submitted = st.form_submit_button("✅ LƯU CÔNG VIỆC", type="primary")
 
         if submitted:
             # 1. Validate
-            if not ten_viec.strip() or not nguoi_nhan_display or nguoi_nhan_display == "Chọn nhân sự...":
-                st.error("⚠️ Tên công việc và Người nhận không được để trống!")
+            if not ten_viec.strip() or nguoi_nhan_display == "Chọn nhân sự...":
+                st.error("⚠️ Tên công việc và Người chủ trì không được để trống!")
                 return
             
             # 2. Map ID từ tên hiển thị
             id_nguoi_giao = map_ns.get(nguoi_giao_display, "")
             id_nguoi_nhan = map_ns.get(nguoi_nhan_display, "")
             
-            # Xử lý người phối hợp (nối chuỗi các ID lại)
             ids_phoi_hop = [map_ns[name] for name in nguoi_phoi_hop_display if name in map_ns]
             str_phoi_hop = ", ".join(ids_phoi_hop)
 
@@ -157,13 +161,13 @@ def render_new_task_tab():
             id_gt = map_gt.get(gt_display, "")
 
             # 3. Tạo row dữ liệu
-            new_id = generate_task_id(df_cv)
+            new_id = next_id
             
-            # Chuẩn hóa ngày (Streamlit Date -> String 'YYYY-MM-DD' cho Excel)
+            # Chuẩn hóa ngày (Streamlit Date -> String 'YYYY-MM-DD' để lưu)
             s_ngay_giao = ngay_giao.strftime("%Y-%m-%d") if ngay_giao else ""
             s_han_chot = han_chot.strftime("%Y-%m-%d") if han_chot else ""
 
-            # Danh sách cột chuẩn (22 cột - Theo cấu trúc file bạn gửi)
+            # Danh sách cột chuẩn (22 cột)
             cols_chuan = [
                 "ID_CONG_VIEC", "TEN_VIEC", "NOI_DUNG", "LOAI_VIEC", "NGUON_GIAO_VIEC",
                 "NGUOI_GIAO", "NGUOI_NHAN", "NGAY_GIAO", "HAN_CHOT", "NGUOI_PHOI_HOP",
@@ -176,7 +180,6 @@ def render_new_task_tab():
             for c in cols_chuan:
                 if c not in df_cv.columns: df_cv[c] = ""
                 
-            # Tạo dictionary dữ liệu mới (Sắp xếp theo cols_chuan để ghi chính xác)
             new_row_data = {
                 "ID_CONG_VIEC": new_id,
                 "TEN_VIEC": ten_viec,
@@ -203,13 +206,11 @@ def render_new_task_tab():
             }
             
             # 4. Lưu
-            # Tạo DataFrame 1 dòng từ dữ liệu mới
             df_new_row = pd.DataFrame([new_row_data], columns=cols_chuan)
-            
             df_new = pd.concat([df_cv, df_new_row], ignore_index=True)
             
             save_raw_sheet("7_CONG_VIEC", df_new)
             
             st.success(f"🎉 Đã lưu công việc mới: **{new_id} - {ten_viec}**")
-            st.cache_data.clear() # Xóa cache để dữ liệu mới hiện ngay trên các tab khác
-            st.rerun() # Tải lại trang để reset form
+            st.cache_data.clear() 
+            st.rerun()
