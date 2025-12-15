@@ -1,5 +1,12 @@
 streamlit
 pandas
-st-gsheets-connection
+gspread
+oauth2client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
 google-generativeai
 python-dateutil
+streamlit
+st-gsheets-connection
