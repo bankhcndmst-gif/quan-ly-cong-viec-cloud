@@ -9,7 +9,7 @@ from streamlit_gsheets import GSheetsConnection
 # CẤU HÌNH TRANG
 # =====================================================
 st.set_page_config(
-    page_title="Hệ thống Nội bộ EVNGENCO1",
+    page_title="Quản lý công việc nội bộ EVNGENCO1",
     layout="wide",
     page_icon="🏢"
 )
@@ -45,7 +45,7 @@ def get_data_from_google_sheet(sheet_name):
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
         return conn.read(worksheet=sheet_name, ttl=0)
-    except:
+    except Exception:
         return pd.DataFrame()
 
 def save_df_to_google_sheet(sheet_name, df):
@@ -117,7 +117,6 @@ def login_logic(username, password):
         return
 
     stored_pass = str(user_row.iloc[0][pass_col]).strip()
-
     if stored_pass != input_pass:
         st.error("❌ Sai mật khẩu")
         return
@@ -126,7 +125,7 @@ def login_logic(username, password):
     st.session_state.logged_in = True
     st.session_state.current_user = (
         user_row.iloc[0]["HO_TEN"]
-        if "HO_TEN" in df_users.columns else "User"
+        if "HO_TEN" in df_users.columns else input_email
     )
 
     raw_role = normalize_text(user_row.iloc[0].get("VAI_TRO", "NHAN_VIEN"))
@@ -166,9 +165,51 @@ if not st.session_state.logged_in:
 # =====================================================
 with st.sidebar:
     st.write(f"👤 **{st.session_state.current_user}**")
-    st.success("🛡️ ADMIN" if st.session_state.user_role == "ADMIN" else "🛡️ NHÂN VIÊN")
+    if st.session_state.user_role == "ADMIN":
+        st.success("🛡️ ADMIN")
+    else:
+        st.info("🛡️ NHÂN VIÊN")
+
     if st.button("Đăng xuất"):
         logout()
+
+# =====================================================
+# HÀM DÙNG CHUNG – RENDER TABLE CHUẨN HỆ THỐNG (CÁCH B)
+# =====================================================
+def render_table(
+    sheet_name: str,
+    editor_key: str,
+    title: str = "",
+    hide_cols: list | None = None
+):
+    if title:
+        st.subheader(title)
+
+    df = get_data_from_google_sheet(sheet_name)
+
+    if df.empty:
+        st.info("Chưa có dữ liệu hoặc không đọc được Sheet.")
+        return
+
+    if hide_cols:
+        df_display = df.drop(columns=[c for c in hide_cols if c in df.columns], errors="ignore")
+    else:
+        df_display = df.copy()
+
+    if st.session_state.user_role == "ADMIN":
+        edited_df = st.data_editor(
+            df_display,
+            num_rows="dynamic",          # 🔥 BẮT BUỘC
+            use_container_width=True,
+            key=editor_key
+        )
+
+        if st.button(f"💾 Lưu {sheet_name}", key=f"save_{editor_key}"):
+            save_df_to_google_sheet(sheet_name, edited_df)
+            st.success("Đã lưu về Google Sheet.")
+            st.rerun()
+    else:
+        st.dataframe(df_display, use_container_width=True)
 
 # =====================================================
 # MAIN UI
@@ -185,28 +226,18 @@ tabs = st.tabs(tabs_name)
 # TAB 1 – CÔNG VIỆC
 # =====================================================
 with tabs[0]:
-    df_tasks = get_data_from_google_sheet("7_CONG_VIEC")
-
-    if df_tasks.empty:
-        st.info("Chưa có dữ liệu")
-    elif st.session_state.user_role == "ADMIN":
-        edited = st.data_editor(df_tasks, num_rows="dynamic", use_container_width=True)
-        if st.button("💾 Lưu công việc"):
-            save_df_to_google_sheet("7_CONG_VIEC", edited)
-            st.success("Đã lưu")
-            st.rerun()
-    else:
-        col_name = next((c for c in df_tasks.columns if "NGUOI" in c.upper()), None)
-        if col_name:
-            df_tasks["_CLEAN"] = df_tasks[col_name].astype(str).str.lower()
-            st.dataframe(df_tasks[df_tasks["_CLEAN"] == st.session_state.current_user.lower()])
-        else:
-            st.dataframe(df_tasks)
+    render_table(
+        sheet_name="7_CONG_VIEC",
+        editor_key="edit_cong_viec",
+        title="📋 Danh sách công việc"
+    )
 
 # =====================================================
-# TAB 2 – CHAT
+# TAB 2 – TRAO ĐỔI
 # =====================================================
 with tabs[1]:
+    st.subheader("💬 Trao đổi nội bộ")
+
     df_chat = get_data_from_google_sheet("10_TRAO_DOI")
     if df_chat.empty:
         df_chat = pd.DataFrame(columns=["Time", "User", "Message"])
@@ -220,18 +251,13 @@ with tabs[1]:
         st.rerun()
 
 # =====================================================
-# TAB 3 – ADMIN
+# TAB 3 – QUẢN TRỊ (ADMIN)
 # =====================================================
 if st.session_state.user_role == "ADMIN":
     with tabs[2]:
-        st.subheader("🔒 Quản trị dữ liệu gốc")
-
-        df_users = get_data_from_google_sheet("1_NHAN_SU")
-        hide_cols = [c for c in df_users.columns if "PASS" in c.upper()]
-        df_safe = df_users.drop(columns=hide_cols, errors="ignore")
-
-        edited_users = st.data_editor(df_safe, num_rows="dynamic", use_container_width=True)
-        if st.button("💾 Lưu nhân sự"):
-            save_df_to_google_sheet("1_NHAN_SU", edited_users)
-            st.success("Đã lưu")
-            st.rerun()
+        render_table(
+            sheet_name="1_NHAN_SU",
+            editor_key="edit_nhan_su",
+            title="⚙️ Quản lý nhân sự",
+            hide_cols=["PASSWORD", "MAT_KHAU", "PASSWORD_HASH"]
+        )
