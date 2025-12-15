@@ -9,7 +9,7 @@ from gemini_chat import render_gemini_chat_tab
 from gemini_task_tab import render_gemini_task_tab
 from gemini_json_import import render_json_import_tab
 from memory_tab import render_memory_tab
-from guide import render_guide_tab # <--- MỚI THÊM
+from guide import render_guide_tab
 
 # =========================================================
 # ✅ CẤU HÌNH GIAO DIỆN
@@ -17,16 +17,25 @@ from guide import render_guide_tab # <--- MỚI THÊM
 st.set_page_config(
     page_title="QLCV Ban KHCNĐMST",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    page_icon="🚀"
 )
 
 # =========================================================
-# ✅ HEADER (CHỮ NHỎ ĐI 20%)
+# ✅ LOGO & HEADER
 # =========================================================
-# Sử dụng HTML để chỉnh cỡ chữ chính xác
+# Thêm logo vào đầu sidebar
+# ⚠️ Lưu ý: Bạn cần để file "logo.png" cùng thư mục với app.py
+try:
+    st.logo("logo.png", link="https://www.evngenco1.vn/")
+except Exception:
+    # Nếu không thấy ảnh thì bỏ qua, không báo lỗi
+    pass
+
+# Tiêu đề chính
 st.markdown(
     """
-    <h3 style='text-align: center; color: #1E88E5;'>
+    <h3 style='text-align: center; color: #0D47A1; margin-bottom: 25px;'>
         HỆ THỐNG QUẢN LÝ CÔNG VIỆC BAN KHCNĐMST + TRỢ LÝ GEMINI
     </h3>
     """, 
@@ -39,7 +48,7 @@ st.markdown(
 menu = st.sidebar.radio(
     "📌 CHỨC NĂNG",
     [
-        "Hướng dẫn sử dụng", # <--- Đưa lên đầu hoặc để cuối tùy bạn
+        "Hướng dẫn sử dụng",
         "Giao việc bằng Gemini",
         "Giao việc thủ công",
         "Báo cáo công việc",
@@ -81,6 +90,19 @@ elif menu == "Nhập liệu từ JSON":
 elif menu == "Trí nhớ AI":
     render_memory_tab()
 
-# Thêm Footer nhỏ
+# =========================================================
+# ✅ FOOTER (THÔNG TIN NGƯỜI THỰC HIỆN)
+# =========================================================
 st.sidebar.markdown("---")
-st.sidebar.caption("Phiên bản: Cloud 1.2 | Dev: ThangNT")
+st.sidebar.markdown(
+    """
+    <div style='text-align: left; color: #424242; font-size: 0.9em; line-height: 1.4;'>
+        <b>Người thực hiện:</b><br>
+        Nguyễn Trọng Thắng<br><br>
+        <b>Công nghệ AI:</b><br>
+        Google Gemini Pro<br><br>
+        <i style='font-size: 0.8em; color: #757575;'>Phiên bản Cloud 1.3</i>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
