@@ -162,7 +162,7 @@ else:
     # --- TAB 1: CÔNG VIỆC ---
     with tabs[0]:
         st.subheader("Tiến độ công việc")
-        df_tasks = get_data_from_google_sheet("2_CONG_VIEC")
+        df_tasks = get_data_from_google_sheet("7_CONG_VIEC")
         
         if not df_tasks.empty:
             # Nếu là NHAN_VIEN -> Chỉ thấy việc của mình
@@ -190,7 +190,7 @@ else:
         
         # Load dữ liệu chat ban đầu từ Sheet (chỉ đọc)
         if "chat_data" not in st.session_state:
-            df_chat_sheet = get_data_from_google_sheet("3_CHAT")
+            df_chat_sheet = get_data_from_google_sheet("10_TRAO_DOI")
             # Chuẩn hóa cột Chat cho đồng nhất
             if not df_chat_sheet.empty and len(df_chat_sheet.columns) >= 3:
                  # Đổi tên 3 cột đầu tiên thành Time, User, Message cho dễ xử lý
@@ -223,3 +223,4 @@ else:
             # Ẩn cột Password khi hiển thị
             safe_cols = [c for c in df_admin_view.columns if "PASS" not in c.upper() and "MAT_KHAU" not in c.upper()]
             st.dataframe(df_admin_view[safe_cols], use_container_width=True)
+
