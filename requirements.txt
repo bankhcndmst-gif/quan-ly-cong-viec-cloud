@@ -11,4 +11,6 @@ python-dateutil
 streamlit
 st-gsheets-connection
 openpyxl
+xlsxwriter
+
 
