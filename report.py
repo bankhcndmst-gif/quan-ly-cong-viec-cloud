@@ -8,38 +8,19 @@ from utils import lookup_display, format_date_vn
 
 
 # =========================================================
-# 🎨 HÀM TÔ MÀU TRẠNG THÁI
+# 🎨 TÔ MÀU TRẠNG THÁI (DÙNG GIÁ TRỊ GỐC TỪ SHEET)
 # =========================================================
 def highlight_status(s):
     s_clean = str(s).strip().upper()
 
-    if s_clean == 'HOÀN THÀNH':
+    if "HOÀN" in s_clean:
         return 'background-color: #d4edda; color: #155724'  # Xanh lá
-    if s_clean == 'TRỄ HẠN':
+    if "TRỄ" in s_clean or "TRE" in s_clean:
         return 'background-color: #f8d7da; color: #721c24'  # Đỏ
-    if s_clean == 'ĐANG THỰC HIỆN':
+    if "ĐANG" in s_clean or "DANG" in s_clean:
         return 'background-color: #ffeeba; color: #856404'  # Vàng
 
     return ''
-
-
-# =========================================================
-# 🔄 TÍNH TRẠNG THÁI CÔNG VIỆC
-# =========================================================
-def compute_status(row):
-    trang_thai_goc = row.get("TRANG_THAI_TONG", "")
-    ngay_xong = row.get("NGAY_THUC_TE_XONG")
-    han = row.get("HAN_CHOT")
-
-    # Nếu đã hoàn thành
-    if str(trang_thai_goc).strip().upper() == "HOÀN THÀNH":
-        return "Hoàn thành"
-
-    # Nếu quá hạn
-    if han and isinstance(han, pd.Timestamp) and han < pd.to_datetime(datetime.now().date()):
-        return "Trễ hạn"
-
-    return "Đang thực hiện"
 
 
 # =========================================================
@@ -64,8 +45,11 @@ def render_report_tab():
         st.warning("Chưa có dữ liệu công việc trong sheet 7_CONG_VIEC.")
         return
 
-    # 2. Tính trạng thái
-    df_cv["TRANG_THAI_TONG"] = df_cv.apply(compute_status, axis=1)
+    # Kiểm tra cột trạng thái
+    if "TRANG_THAI_TONG" not in df_cv.columns:
+        st.error("Không tìm thấy cột 'TRANG_THAI_TONG' trong sheet 7_CONG_VIEC.")
+        st.write("Các cột hiện có:", list(df_cv.columns))
+        return
 
     # =========================================================
     # 🔍 BỘ LỌC
@@ -81,70 +65,85 @@ def render_report_tab():
         col4, col5, col6 = st.columns(3)
 
         # Map dữ liệu
-        da_map = dict(zip(df_da["ID_DU_AN"], df_da["TEN_DU_AN"])) if "ID_DU_AN" in df_da else {}
+        da_map = dict(zip(df_da["ID_DU_AN"], df_da["TEN_DU_AN"])) if "ID_DU_AN" in df_da.columns else {}
         list_da = ["Tất cả"] + list(da_map.values())
 
-        gt_map = dict(zip(df_gt["ID_GOI_THAU"], df_gt["TEN_GOI_THAU"])) if "ID_GOI_THAU" in df_gt else {}
+        gt_map = dict(zip(df_gt["ID_GOI_THAU"], df_gt["TEN_GOI_THAU"])) if "ID_GOI_THAU" in df_gt.columns else {}
         list_gt = ["Tất cả"] + list(gt_map.values())
 
-        hd_map = dict(zip(df_hd["ID_HOP_DONG"], df_hd["TEN_HD"])) if "ID_HOP_DONG" in df_hd else {}
+        hd_map = dict(zip(df_hd["ID_HOP_DONG"], df_hd["TEN_HD"])) if "ID_HOP_DONG" in df_hd.columns else {}
         list_hd = ["Tất cả"] + list(hd_map.values())
 
-        # Bộ lọc
+        # Bộ lọc tìm kiếm
         search_ten = col1.text_input("Tên công việc (Từ khóa)", "")
         filter_da = col2.selectbox("Dự án", list_da)
         filter_gt = col3.selectbox("Gói thầu", list_gt)
         filter_hd = col4.selectbox("Hợp đồng", list_hd)
 
-        list_loai = ["Tất cả"] + list(df_cv["LOAI_VIEC"].dropna().unique()) if "LOAI_VIEC" in df_cv else ["Tất cả"]
+        if "LOAI_VIEC" in df_cv.columns:
+            list_loai = ["Tất cả"] + list(df_cv["LOAI_VIEC"].dropna().unique())
+        else:
+            list_loai = ["Tất cả"]
         filter_loai = col5.selectbox("Loại việc", list_loai)
 
-        # 🔥 Lấy danh sách trạng thái từ dữ liệu thật
-        list_tt = ["Tất cả"] + sorted(df_cv["TRANG_THAI_TONG"].dropna().unique())
-        filter_tt = col6.selectbox("Trạng thái", list_tt)
+        # 🔥 DANH SÁCH TRẠNG THÁI LẤY ĐÚNG TỪ SHEET
+        raw_status_values = (
+            df_cv["TRANG_THAI_TONG"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .unique()
+        )
+
+        list_tt = ["Tất cả"] + sorted(raw_status_values)
+        filter_tt = col6.selectbox("Trạng thái (từ sheet)", list_tt)
 
     # =========================================================
-    # ⚙️ XỬ LÝ LỌC
+    # ⚙️ XỬ LỌC
     # =========================================================
     df_filtered = df_cv.copy()
 
-    # Lọc theo ngày giao
-    if date_from:
-        df_filtered = df_filtered[df_filtered["NGAY_GIAO"] >= pd.to_datetime(date_from)]
-
-    if date_to:
-        df_filtered = df_filtered[df_filtered["NGAY_GIAO"] <= pd.to_datetime(date_to)]
+    # Lọc theo NGAY_GIAO
+    if "NGAY_GIAO" in df_filtered.columns:
+        if date_from:
+            df_filtered = df_filtered[df_filtered["NGAY_GIAO"] >= pd.to_datetime(date_from)]
+        if date_to:
+            df_filtered = df_filtered[df_filtered["NGAY_GIAO"] <= pd.to_datetime(date_to)]
 
     # Lọc tên
-    if search_ten:
-        df_filtered = df_filtered[df_filtered["TEN_VIEC"].astype(str).str.contains(search_ten, case=False, na=False)]
+    if search_ten and "TEN_VIEC" in df_filtered.columns:
+        df_filtered = df_filtered[
+            df_filtered["TEN_VIEC"].astype(str).str.contains(search_ten, case=False, na=False)
+        ]
 
     # Lọc dự án/gói thầu/hợp đồng
     def find_id(map_dict, value):
         return [k for k, v in map_dict.items() if v == value]
 
-    if filter_da != "Tất cả":
+    if filter_da != "Tất cả" and "IDDA_CV" in df_filtered.columns:
         ids = find_id(da_map, filter_da)
         if ids:
             df_filtered = df_filtered[df_filtered["IDDA_CV"] == ids[0]]
 
-    if filter_gt != "Tất cả":
+    if filter_gt != "Tất cả" and "IDGT_CV" in df_filtered.columns:
         ids = find_id(gt_map, filter_gt)
         if ids:
             df_filtered = df_filtered[df_filtered["IDGT_CV"] == ids[0]]
 
-    if filter_hd != "Tất cả":
+    if filter_hd != "Tất cả" and "IDHD_CV" in df_filtered.columns:
         ids = find_id(hd_map, filter_hd)
         if ids:
             df_filtered = df_filtered[df_filtered["IDHD_CV"] == ids[0]]
 
     # Lọc loại
-    if filter_loai != "Tất cả":
+    if filter_loai != "Tất cả" and "LOAI_VIEC" in df_filtered.columns:
         df_filtered = df_filtered[df_filtered["LOAI_VIEC"] == filter_loai]
 
-    # Lọc trạng thái
+    # Lọc trạng thái (giữ nguyên theo sheet)
     if filter_tt != "Tất cả":
-        df_filtered = df_filtered[df_filtered["TRANG_THAI_TONG"] == filter_tt]
+        df_filtered = df_filtered[
+            df_filtered["TRANG_THAI_TONG"].astype(str).str.strip() == filter_tt
+        ]
 
     # =========================================================
     # 📋 HIỂN THỊ KẾT QUẢ
@@ -158,38 +157,51 @@ def render_report_tab():
     df_show = df_filtered.copy()
 
     # Map tên nhân sự
-    if "NGUOI_NHAN" in df_show:
+    if "NGUOI_NHAN" in df_show.columns and not df_ns.empty:
         df_show["NGUOI_NHAN"] = df_show["NGUOI_NHAN"].apply(
             lambda x: lookup_display(x, df_ns, "ID_NHAN_SU", ["HO_TEN"])
         )
 
     # Map dự án/gói thầu
-    df_show["DU_AN"] = df_show["IDDA_CV"].map(da_map).fillna("-")
-    df_show["GOI_THAU"] = df_show["IDGT_CV"].map(gt_map).fillna("-")
+    if "IDDA_CV" in df_show.columns:
+        df_show["DU_AN"] = df_show["IDDA_CV"].map(da_map).fillna("-")
+    if "IDGT_CV" in df_show.columns:
+        df_show["GOI_THAU"] = df_show["IDGT_CV"].map(gt_map).fillna("-")
 
-    # Format ngày
-    if "HAN_CHOT" in df_show:
+    # Format ngày hạn chót
+    if "HAN_CHOT" in df_show.columns:
         df_show["HAN_CHOT"] = df_show["HAN_CHOT"].apply(format_date_vn)
 
-    # =========================================================
-    # 📥 XUẤT EXCEL
-    # =========================================================
-    excel_buffer = io.BytesIO()
-    df_show.to_excel(excel_buffer, index=False)
-    excel_buffer.seek(0)
+    # Chọn cột hiển thị
+    desired_cols = [
+        "ID_CONG_VIEC",
+        "TEN_VIEC",
+        "NGUOI_NHAN",
+        "NGAY_GIAO",
+        "HAN_CHOT",
+        "TRANG_THAI_TONG",
+        "DU_AN",
+        "GOI_THAU",
+        "LOAI_VIEC",
+    ]
+    final_cols = [c for c in desired_cols if c in df_show.columns]
 
+    # =========================================================
+    # 📥 XUẤT CSV (tránh lỗi openpyxl)
+    # =========================================================
+    csv_data = df_show[final_cols].to_csv(index=False).encode("utf-8-sig")
     st.download_button(
-        label="📥 Tải Excel",
-        data=excel_buffer,
-        file_name="bao_cao_cong_viec.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        label="📥 Tải CSV",
+        data=csv_data,
+        file_name="bao_cao_cong_viec.csv",
+        mime="text/csv"
     )
 
     # =========================================================
     # 📌 HIỂN THỊ BẢNG
     # =========================================================
     st.dataframe(
-        df_show.style.applymap(highlight_status, subset=['TRANG_THAI_TONG']),
+        df_show[final_cols].style.applymap(highlight_status, subset=['TRANG_THAI_TONG']),
         use_container_width=True,
         hide_index=True
     )
