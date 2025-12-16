@@ -10,3 +10,5 @@ google-generativeai
 python-dateutil
 streamlit
 st-gsheets-connection
+openpyxl
+
