@@ -1,4 +1,50 @@
 import streamlit as st
+import pandas as pd
+import io
+from datetime import datetime
+
+from gsheet import load_all_sheets
+from utils import lookup_display, format_date_vn
+
+
+# =========================================================
+# 🎨 HÀM TÔ MÀU TRẠNG THÁI
+# =========================================================
+def highlight_status(s):
+    s_clean = str(s).strip().upper()
+
+    if s_clean == 'HOÀN THÀNH':
+        return 'background-color: #d4edda; color: #155724'  # Xanh lá
+    if s_clean == 'TRỄ HẠN':
+        return 'background-color: #f8d7da; color: #721c24'  # Đỏ
+    if s_clean == 'ĐANG THỰC HIỆN':
+        return 'background-color: #ffeeba; color: #856404'  # Vàng
+
+    return ''
+
+
+# =========================================================
+# 🔄 TÍNH TRẠNG THÁI CÔNG VIỆC
+# =========================================================
+def compute_status(row):
+    trang_thai_goc = row.get("TRANG_THAI_TONG", "")
+    ngay_xong = row.get("NGAY_THUC_TE_XONG")
+    han = row.get("HAN_CHOT")
+
+    # Nếu đã hoàn thành
+    if str(trang_thai_goc).strip().upper() == "HOÀN THÀNH":
+        return "Hoàn thành"
+
+    # Nếu quá hạn
+    if han and isinstance(han, pd.Timestamp) and han < pd.to_datetime(datetime.now().date()):
+        return "Trễ hạn"
+
+    return "Đang thực hiện"
+
+
+# =========================================================
+# 📊 TAB BÁO CÁO CÔNG VIỆC
+# =========================================================
 def render_report_tab():
     st.header("📊 Báo cáo công việc")
 
@@ -26,6 +72,7 @@ def render_report_tab():
     # =========================================================
     with st.expander("🔍 Bộ lọc nâng cao", expanded=True):
 
+        # --- Lọc theo ngày giao ---
         colA, colB = st.columns(2)
         date_from = colA.date_input("Từ ngày (NGAY_GIAO)", None)
         date_to = colB.date_input("Đến ngày (NGAY_GIAO)", None)
@@ -52,7 +99,7 @@ def render_report_tab():
         list_loai = ["Tất cả"] + list(df_cv["LOAI_VIEC"].dropna().unique()) if "LOAI_VIEC" in df_cv else ["Tất cả"]
         filter_loai = col5.selectbox("Loại việc", list_loai)
 
-        # 🔥 Sửa bộ lọc trạng thái
+        # 🔥 Lấy danh sách trạng thái từ dữ liệu thật
         list_tt = ["Tất cả"] + sorted(df_cv["TRANG_THAI_TONG"].dropna().unique())
         filter_tt = col6.selectbox("Trạng thái", list_tt)
 
@@ -124,7 +171,9 @@ def render_report_tab():
     if "HAN_CHOT" in df_show:
         df_show["HAN_CHOT"] = df_show["HAN_CHOT"].apply(format_date_vn)
 
-    # Xuất Excel
+    # =========================================================
+    # 📥 XUẤT EXCEL
+    # =========================================================
     excel_buffer = io.BytesIO()
     df_show.to_excel(excel_buffer, index=False)
     excel_buffer.seek(0)
@@ -136,7 +185,9 @@ def render_report_tab():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # Hiển thị bảng
+    # =========================================================
+    # 📌 HIỂN THỊ BẢNG
+    # =========================================================
     st.dataframe(
         df_show.style.applymap(highlight_status, subset=['TRANG_THAI_TONG']),
         use_container_width=True,
