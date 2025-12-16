@@ -9,13 +9,13 @@ def render_guide_tab():
 
     ---
 
-    ### 1. 🤖 Giao việc bằng Gemini (Dành cho Sếp/Quản lý)
+    ### 1. 🤖 Giao việc bằng Gemini 
     Đây là tính năng giúp bạn giao việc nhanh bằng ngôn ngữ tự nhiên.
     
     * **Bước 1:** Chọn menu **"Giao việc bằng Gemini"**.
     * **Bước 2:** Nhập câu lệnh vào ô trống.
-        * *Ví dụ 1:* "Giao cho anh Nam làm báo cáo quý 3 dự án Điện Gió, hạn chót thứ 6 tuần này."
-        * *Ví dụ 2:* "Yêu cầu phòng Kỹ thuật kiểm tra hiện trường gói thầu số 5, phối hợp với chị Lan."
+        * *Ví dụ 1:* "Giao cho anh Thắng làm báo cáo hàng tuần, hạn chót thứ 6 hàng tuần."
+        * *Ví dụ 2:* "Hoàn thiện hồ sơ 3 dự án chuyển đổi số."
     * **Bước 3:** Bấm **"🚀 Phân tích bằng Gemini"**.
     * **Bước 4:** Kiểm tra lại bảng nháp (AI có thể hiểu sai ngày tháng, bạn có thể sửa lại trực tiếp trên bảng).
     * **Bước 5:** Bấm **"💾 Lưu vào hệ thống"**.
@@ -31,7 +31,7 @@ def render_guide_tab():
     ---
 
     ### 3. 📊 Báo cáo công việc
-    Nơi theo dõi toàn bộ bức tranh công việc của Ban.
+    Nơi theo dõi toàn bộ công việc của Ban.
     
     * **Màu sắc:** Hệ thống tự động tô 🔴 **Đỏ** cho việc trễ hạn, 🟢 **Xanh** cho việc hoàn thành.
     * **Bộ lọc đa năng:** Bạn có thể lọc theo:
